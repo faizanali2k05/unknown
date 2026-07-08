@@ -1,0 +1,33 @@
+# =============================================================================
+#  UNKNOWN — LiveKit server config (Phase 4)
+# -----------------------------------------------------------------------------
+#  Host-networked. UDP media range MUST match LIVEKIT_UDP_PORT_START/END in
+#  .env and be opened in the firewall (Confirm-before).
+#  Replace ${...} placeholders at deploy time (envsubst) or hardcode from .env.
+# =============================================================================
+
+port: 7880                       # signaling (HTTP/WS) — proxied by Caddy
+rtc:
+  tcp_port: 7881                 # RTC over TCP fallback
+  port_range_start: 50000        # = LIVEKIT_UDP_PORT_START
+  port_range_end: 50100          # = LIVEKIT_UDP_PORT_END
+  use_external_ip: true          # discover public IP for mobile clients
+
+keys:
+  # key: secret  — must match LIVEKIT_API_KEY / LIVEKIT_API_SECRET in .env
+  unknown_dev_key: __CHANGE_ME_64_HEX__
+
+# Use the self-hosted coturn for relay when peers are behind strict NAT.
+turn:
+  enabled: false                 # coturn runs standalone; LiveKit advertises it via ICE
+  # If you prefer LiveKit's embedded TURN instead of coturn, enable here.
+
+logging:
+  level: info
+  json: false
+
+# Room defaults for 1:1 app calls.
+room:
+  auto_create: true
+  empty_timeout: 120             # close empty rooms after 2 min
+  max_participants: 8            # 1:1 now; headroom for small group later

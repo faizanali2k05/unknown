@@ -1,0 +1,170 @@
+# =============================================================================
+#  UNKNOWN — Docker Compose (data + API layer)
+# -----------------------------------------------------------------------------
+#  n8n-SAFETY CONTRACT:
+#   • Every container/volume/network is prefixed `unknown_`.
+#   • Dedicated isolated bridge network `unknown_net` — never the default
+#     bridge, never n8n's network.
+#   • Internal services (postgres/redis/minio) publish NO host ports. They are
+#     reachable only by service DNS name over unknown_net. A clash with n8n's
+#     Postgres on host 5432 is therefore structurally impossible.
+#   • The API only binds a host port (default 127.0.0.1:8090) when no proxy
+#     fronts it. When the existing proxy routes the API subdomain, that bind
+#     stays on loopback.
+#
+#  Run with the project flag so resources are grouped & isolated:
+#     docker compose -p unknown up -d
+#  (COMPOSE_PROJECT_NAME=unknown in .env makes -p optional.)
+#
+#  LiveKit + coturn live in docker-compose.media.yml (Phase 4, host networking).
+# =============================================================================
+
+name: unknown
+
+services:
+  # ---------------------------------------------------------------------------
+  #  PostgreSQL — system of record. Internal only.
+  # ---------------------------------------------------------------------------
+  unknown_postgres:
+    image: postgres:16-alpine
+    container_name: unknown_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - unknown_pgdata:/var/lib/postgresql/data
+    networks:
+      - unknown_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # NO ports: — internal only.
+
+  # ---------------------------------------------------------------------------
+  #  Redis — presence, pub/sub fan-out, ephemeral call state. Internal only.
+  # ---------------------------------------------------------------------------
+  unknown_redis:
+    image: redis:7-alpine
+    container_name: unknown_redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - unknown_redisdata:/data
+    networks:
+      - unknown_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # NO ports: — internal only.
+
+  # ---------------------------------------------------------------------------
+  #  MinIO — voicemail / media object storage. Internal only.
+  #  Console (9001) intentionally NOT published; tunnel via SSH if needed.
+  # ---------------------------------------------------------------------------
+  unknown_minio:
+    image: minio/minio:latest
+    container_name: unknown_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - unknown_miniodata:/data
+    networks:
+      - unknown_net
+    ports:
+      # Bound to the docker gateway only (not public) so Caddy can route
+      # media.<domain> -> MinIO for signed voicemail URLs. ufw blocks external.
+      - "172.17.0.1:9000:9000"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    # NO ports: — internal only.
+
+  # ---------------------------------------------------------------------------
+  #  MinIO bucket bootstrap — creates the voicemail bucket once, then exits.
+  # ---------------------------------------------------------------------------
+  unknown_minio_init:
+    image: minio/mc:latest
+    container_name: unknown_minio_init
+    depends_on:
+      unknown_minio:
+        condition: service_healthy
+    networks:
+      - unknown_net
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://unknown_minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD};
+      mc mb --ignore-existing local/$${S3_BUCKET};
+      mc anonymous set none local/$${S3_BUCKET};
+      echo 'bucket ready';
+      "
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      S3_BUCKET: ${S3_BUCKET}
+    restart: "no"
+
+  # ---------------------------------------------------------------------------
+  #  NestJS API + Auth + WebSocket gateway.
+  #  Binds ONLY to ${API_HOST_BIND} (default loopback) so the existing proxy
+  #  can route the API subdomain to it without exposing it publicly itself.
+  # ---------------------------------------------------------------------------
+  unknown_api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    image: unknown_api:latest
+    container_name: unknown_api
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      unknown_postgres:
+        condition: service_healthy
+      unknown_redis:
+        condition: service_healthy
+      unknown_minio:
+        condition: service_healthy
+    networks:
+      - unknown_net
+    volumes:
+      # Read-only secrets (FCM service account). Kept out of git.
+      - ./secrets:/app/secrets:ro
+    ports:
+      # host -> container.  Default 127.0.0.1:8090 -> 3000.
+      - "${API_HOST_BIND:-127.0.0.1}:${API_HOST_PORT:-8090}:${API_PORT:-3000}"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:'+(process.env.API_PORT||3000)+'/v1/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+# -----------------------------------------------------------------------------
+#  Isolated bridge network. Unknown's containers cannot reach n8n's and
+#  vice-versa. `internal: false` because the API needs outbound (push, certs).
+# -----------------------------------------------------------------------------
+networks:
+  unknown_net:
+    name: ${NETWORK_NAME:-unknown_net}
+    driver: bridge
+
+# -----------------------------------------------------------------------------
+#  Named volumes — all prefixed unknown_ so they never alias n8n's.
+# -----------------------------------------------------------------------------
+volumes:
+  unknown_pgdata:
+    name: unknown_pgdata
+  unknown_redisdata:
+    name: unknown_redisdata
+  unknown_miniodata:
+    name: unknown_miniodata

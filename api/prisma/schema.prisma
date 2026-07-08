@@ -1,0 +1,231 @@
+// =============================================================================
+//  UNKNOWN — Prisma schema (system of record). Mirrors TRD §2.
+//  Closed-network model: routing is ALWAYS by internal userId / numberId.
+//  `display_number` fields are user-chosen labels rendered by other app
+//  clients — never telephone caller ID, never the PSTN.
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum SubscriptionTier {
+  free
+  subscriber
+}
+
+enum ConversationType {
+  direct
+  group // reserved for later
+}
+
+enum CallStatus {
+  ringing
+  active
+  ended
+  missed
+  declined
+}
+
+enum DevicePlatform {
+  ios
+  android
+}
+
+enum SubscriptionProvider {
+  apple_iap
+  google_play
+  web_stripe
+  web_paddle
+}
+
+// -----------------------------------------------------------------------------
+//  User
+// -----------------------------------------------------------------------------
+model User {
+  id                    String           @id @default(uuid())
+  username              String           @unique
+  passwordHash          String           @map("password_hash")
+  sequenceNo            String           @unique @map("sequence_no")
+  subscriptionTier      SubscriptionTier @default(free) @map("subscription_tier")
+  subscriptionExpiresAt DateTime?        @map("subscription_expires_at")
+  createdAt             DateTime         @default(now()) @map("created_at")
+
+  numbers              Number[]
+  refreshTokens        RefreshToken[]
+  conversationMembers  ConversationMember[]
+  sentMessages         Message[]            @relation("MessageSender")
+  callsMade            CallSession[]        @relation("Caller")
+  callsReceived        CallSession[]        @relation("Callee")
+  voicemailsSent       Voicemail[]          @relation("VoicemailFrom")
+  voicemailsReceived   Voicemail[]          @relation("VoicemailTo")
+  devices              Device[]
+  subscriptions        Subscription[]
+
+  @@map("users")
+}
+
+// -----------------------------------------------------------------------------
+//  RefreshToken — rotating, stored hashed, revocable (TRD §7).
+// -----------------------------------------------------------------------------
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  tokenHash String   @map("token_hash") // argon2 hash of the refresh token
+  expiresAt DateTime @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// -----------------------------------------------------------------------------
+//  Number — in-app identifier / display label owned by a user.
+// -----------------------------------------------------------------------------
+model Number {
+  id               String   @id @default(uuid())
+  userId           String   @map("user_id")
+  value            String   @unique // the in-app number/label
+  label            String   @default("")
+  isDefaultDisplay Boolean  @default(false) @map("is_default_display")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("numbers")
+}
+
+// -----------------------------------------------------------------------------
+//  Conversation + membership
+// -----------------------------------------------------------------------------
+model Conversation {
+  id        String           @id @default(uuid())
+  type      ConversationType @default(direct)
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  members  ConversationMember[]
+  messages Message[]
+
+  @@map("conversations")
+}
+
+model ConversationMember {
+  id             String @id @default(uuid())
+  conversationId String @map("conversation_id")
+  userId         String @map("user_id")
+  unreadCount    Int    @default(0) @map("unread_count")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@map("conversation_members")
+}
+
+// -----------------------------------------------------------------------------
+//  Message — carries the sender's chosen display_number label.
+// -----------------------------------------------------------------------------
+model Message {
+  id                  String    @id @default(uuid())
+  conversationId      String    @map("conversation_id")
+  senderUserId        String    @map("sender_user_id")
+  senderDisplayNumber String    @map("sender_display_number")
+  body                String
+  mediaUrl            String?   @map("media_url")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  deliveredAt         DateTime? @map("delivered_at")
+  readAt              DateTime? @map("read_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation("MessageSender", fields: [senderUserId], references: [id])
+
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+// -----------------------------------------------------------------------------
+//  CallSession — signaling record. Real media via LiveKit (Phase 4).
+// -----------------------------------------------------------------------------
+model CallSession {
+  id                  String     @id @default(uuid())
+  callerUserId        String     @map("caller_user_id")
+  calleeUserId        String     @map("callee_user_id")
+  callerDisplayNumber String     @map("caller_display_number")
+  livekitRoom         String     @map("livekit_room")
+  status              CallStatus @default(ringing)
+  startedAt           DateTime   @default(now()) @map("started_at")
+  endedAt             DateTime?  @map("ended_at")
+
+  caller User @relation("Caller", fields: [callerUserId], references: [id])
+  callee User @relation("Callee", fields: [calleeUserId], references: [id])
+
+  @@index([callerUserId])
+  @@index([calleeUserId])
+  @@map("call_sessions")
+}
+
+// -----------------------------------------------------------------------------
+//  Voicemail — audio stored in MinIO, referenced by object key.
+// -----------------------------------------------------------------------------
+model Voicemail {
+  id                String   @id @default(uuid())
+  fromUserId        String   @map("from_user_id")
+  toUserId          String   @map("to_user_id")
+  fromDisplayNumber String   @map("from_display_number")
+  audioObjectKey    String   @map("audio_object_key")
+  durationSec       Int      @map("duration_sec")
+  isRead            Boolean  @default(false) @map("is_read")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  from User @relation("VoicemailFrom", fields: [fromUserId], references: [id])
+  to   User @relation("VoicemailTo", fields: [toUserId], references: [id])
+
+  @@index([toUserId])
+  @@map("voicemails")
+}
+
+// -----------------------------------------------------------------------------
+//  Device — push targets (FCM + PushKit VoIP). Phase 4 dispatch.
+// -----------------------------------------------------------------------------
+model Device {
+  id            String         @id @default(uuid())
+  userId        String         @map("user_id")
+  platform      DevicePlatform
+  fcmToken      String?        @map("fcm_token")
+  apnsVoipToken String?        @map("apns_voip_token")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, platform])
+  @@index([userId])
+  @@map("devices")
+}
+
+// -----------------------------------------------------------------------------
+//  Subscription — provider ledger (server is source of truth).
+// -----------------------------------------------------------------------------
+model Subscription {
+  id               String               @id @default(uuid())
+  userId           String               @map("user_id")
+  provider         SubscriptionProvider
+  externalId       String               @map("external_id")
+  status           String
+  currentPeriodEnd DateTime?            @map("current_period_end")
+  createdAt        DateTime             @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("subscriptions")
+}
