@@ -1,5 +1,5 @@
-# Not uploaded to EAS Build. google-services.json is deliberately absent from
-# this list — the Android build needs it to wire up FCM.
+# Not uploaded to EAS Build. google-services.json is no longer in the repo at
+# all — EAS injects it from the GOOGLE_SERVICES_JSON file secret.
 node_modules/
 .expo/
 android/

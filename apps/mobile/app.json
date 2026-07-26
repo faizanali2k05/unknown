@@ -18,7 +18,6 @@
     ],
     "android": {
       "package": "co.uk.seemaai.unknown",
-      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#07120C"

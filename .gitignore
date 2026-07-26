@@ -8,8 +8,12 @@ secrets/
 *.p12
 *.jks
 *.keystore
-# NOTE: google-services.json is deliberately NOT ignored. It is not a secret
-# (it ships inside every Android APK) and EAS Build needs it to configure FCM.
+# Firebase Android config. It ships inside the APK, so it is not a server
+# secret — but it carries an API key that GitHub's scanner flags, so it stays
+# out of the repo. EAS gets it from the GOOGLE_SERVICES_JSON file secret
+# instead (see apps/mobile/app.config.js).
+google-services.json
+GoogleService-Info.plist
 
 # ---------- Node ----------
 node_modules/
