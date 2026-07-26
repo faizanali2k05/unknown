@@ -1,0 +1,209 @@
+// =============================================================================
+//  Unknown — internal team messaging & calling app.
+//  Mirrors the SQL in CLAUDE.md. Two rules that drive the design:
+//    1. messages.clientId is generated ON THE DEVICE before send. It powers the
+//       offline queue, duplicate prevention and the sending→sent→delivered→read
+//       pipeline. The server is never the source of a message's identity.
+//    2. Read state lives in conversationMembers.lastReadAt — never a row per
+//       message per user.
+//  There is no "numbers"/display-number concept: this is a closed team app,
+//  people are identified by username + display name.
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ConversationType {
+  direct
+  group
+}
+
+enum MemberRole {
+  member
+  admin
+}
+
+enum MessageType {
+  text
+  image
+  voice
+  file
+  system
+}
+
+enum CallKind {
+  audio
+  video
+}
+
+// -----------------------------------------------------------------------------
+//  User
+// -----------------------------------------------------------------------------
+model User {
+  id           String    @id @default(uuid()) @db.Uuid
+  username     String    @unique
+  passwordHash String    @map("password_hash")
+  displayName  String    @map("display_name")
+  avatarUrl    String?   @map("avatar_url")
+  statusText   String?   @map("status_text")
+  lastSeenAt   DateTime? @map("last_seen_at") @db.Timestamptz
+  isActive     Boolean   @default(true) @map("is_active")
+  // Admins mint invite codes. Not in the base spec, but registration is
+  // invite-only so someone has to be allowed to create them.
+  isAdmin      Boolean   @default(false) @map("is_admin")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  memberships    ConversationMember[]
+  messages       Message[]            @relation("MessageSender")
+  conversations  Conversation[]       @relation("ConversationCreator")
+  callsInitiated Call[]               @relation("CallInitiator")
+  devices        Device[]
+  refreshTokens  RefreshToken[]
+  invitesCreated InviteCode[]         @relation("InviteCreator")
+  inviteUsed     InviteCode?          @relation("InviteRedeemer")
+
+  @@map("users")
+}
+
+// -----------------------------------------------------------------------------
+//  Auth support
+// -----------------------------------------------------------------------------
+
+/// Rotating refresh tokens, stored hashed so a DB leak cannot be replayed.
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @map("token_hash")
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+/// Registration is invite-only: an admin generates a code, one code = one user.
+model InviteCode {
+  id           String    @id @default(uuid()) @db.Uuid
+  code         String    @unique
+  createdById  String    @map("created_by") @db.Uuid
+  redeemedById String?   @unique @map("redeemed_by") @db.Uuid
+  redeemedAt   DateTime? @map("redeemed_at") @db.Timestamptz
+  expiresAt    DateTime? @map("expires_at") @db.Timestamptz
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  createdBy  User  @relation("InviteCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  redeemedBy User? @relation("InviteRedeemer", fields: [redeemedById], references: [id], onDelete: SetNull)
+
+  @@index([createdById])
+  @@map("invite_codes")
+}
+
+// -----------------------------------------------------------------------------
+//  Conversations
+// -----------------------------------------------------------------------------
+model Conversation {
+  id        String           @id @default(uuid()) @db.Uuid
+  type      ConversationType
+  title     String?
+  avatarUrl String?          @map("avatar_url")
+  createdBy String?          @map("created_by") @db.Uuid
+  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz
+
+  creator  User?                @relation("ConversationCreator", fields: [createdBy], references: [id])
+  members  ConversationMember[]
+  messages Message[]
+  calls    Call[]
+
+  @@map("conversations")
+}
+
+model ConversationMember {
+  conversationId String     @map("conversation_id") @db.Uuid
+  userId         String     @map("user_id") @db.Uuid
+  role           MemberRole @default(member)
+  /// Single source of read state — unread count is derived from this.
+  lastReadAt     DateTime?  @map("last_read_at") @db.Timestamptz
+  joinedAt       DateTime   @default(now()) @map("joined_at") @db.Timestamptz
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, userId])
+  @@index([userId])
+  @@map("conversation_members")
+}
+
+// -----------------------------------------------------------------------------
+//  Messages
+// -----------------------------------------------------------------------------
+model Message {
+  id String @id @default(uuid()) @db.Uuid
+  /// Generated on the device before send. Makes retries idempotent.
+  clientId       String      @map("client_id") @db.Uuid
+  conversationId String      @map("conversation_id") @db.Uuid
+  senderId       String?     @map("sender_id") @db.Uuid
+  type           MessageType @default(text)
+  body           String?
+  mediaUrl       String?     @map("media_url")
+  mediaMeta      Json?       @map("media_meta")
+  replyToId      String?     @map("reply_to_id") @db.Uuid
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  editedAt       DateTime?   @map("edited_at") @db.Timestamptz
+  /// Soft delete — "delete for everyone" sets this, the row stays.
+  deletedAt      DateTime?   @map("deleted_at") @db.Timestamptz
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User?        @relation("MessageSender", fields: [senderId], references: [id])
+  replyTo      Message?     @relation("MessageReplies", fields: [replyToId], references: [id])
+  replies      Message[]    @relation("MessageReplies")
+
+  @@unique([conversationId, clientId])
+  @@index([conversationId, createdAt(sort: Desc)])
+  @@map("messages")
+}
+
+// -----------------------------------------------------------------------------
+//  Calls — every call is relayed through LiveKit (team of <50, no P2P).
+// -----------------------------------------------------------------------------
+model Call {
+  id             String    @id @default(uuid()) @db.Uuid
+  conversationId String    @map("conversation_id") @db.Uuid
+  initiatorId    String?   @map("initiator_id") @db.Uuid
+  kind           CallKind
+  /// Random UUID — never derived from conversation or user ids.
+  roomName       String    @map("room_name")
+  startedAt      DateTime  @default(now()) @map("started_at") @db.Timestamptz
+  endedAt        DateTime? @map("ended_at") @db.Timestamptz
+  endReason      String?   @map("end_reason")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+  initiator    User?        @relation("CallInitiator", fields: [initiatorId], references: [id])
+
+  @@index([conversationId, startedAt(sort: Desc)])
+  @@map("calls")
+}
+
+// -----------------------------------------------------------------------------
+//  Devices — FCM push targets (Android only).
+// -----------------------------------------------------------------------------
+model Device {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  fcmToken  String   @unique @map("fcm_token")
+  platform  String   @default("android")
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("devices")
+}

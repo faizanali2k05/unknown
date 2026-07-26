@@ -1,0 +1,102 @@
+# =============================================================================
+#  Unknown — Phase 1 infrastructure
+# -----------------------------------------------------------------------------
+#  This VPS is SHARED with unrelated production workloads (seema/*, n8n).
+#  Safety contract:
+#    • Every resource is prefixed `unknown-`. Compose project name: `unknown`.
+#    • One dedicated bridge network `unknown-net`. We never attach to
+#      seema_default, n8n_default or the default bridge.
+#    • Postgres and Redis publish NOTHING — they are reachable only by
+#      container name over unknown-net. A port clash with the other stacks is
+#      therefore structurally impossible.
+#    • The API publishes on the docker bridge gateway (172.17.0.1) only, never
+#      0.0.0.0. That is the same pattern the existing n8n vhost uses, and it is
+#      what lets the containerised Caddy reach us (inside that container
+#      127.0.0.1 means Caddy itself, not the host).
+#
+#  Usage — always from this directory:
+#      docker compose up -d
+#      docker compose logs -f unknown-api
+#
+#  LiveKit + coturn are Phase 7 and deliberately not in this file yet.
+# =============================================================================
+
+name: unknown
+
+services:
+  # ---------------------------------------------------------------------------
+  #  PostgreSQL — system of record. Not published.
+  # ---------------------------------------------------------------------------
+  unknown-postgres:
+    image: postgres:16-alpine
+    container_name: unknown-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - unknown-pgdata:/var/lib/postgresql/data
+    networks: [unknown-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  #  Redis — presence, socket routing, ephemeral state. Not published.
+  # ---------------------------------------------------------------------------
+  unknown-redis:
+    image: redis:7-alpine
+    container_name: unknown-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - unknown-redisdata:/data
+    networks: [unknown-net]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  #  NestJS API + Socket.IO gateway.
+  #  Published ONLY on the docker bridge gateway so Caddy can reach it.
+  # ---------------------------------------------------------------------------
+  unknown-api:
+    build:
+      context: ../apps/server
+      dockerfile: Dockerfile
+    image: unknown-api:latest
+    container_name: unknown-api
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      unknown-postgres: { condition: service_healthy }
+      unknown-redis: { condition: service_healthy }
+    networks: [unknown-net]
+    ports:
+      - "${API_BIND_ADDR:-172.17.0.1}:${API_HOST_PORT:-8100}:${API_PORT:-3000}"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('http').get('http://127.0.0.1:'+(process.env.API_PORT||3000)+'/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+networks:
+  unknown-net:
+    name: unknown-net
+    driver: bridge
+
+volumes:
+  unknown-pgdata:
+    name: unknown-pgdata
+  unknown-redisdata:
+    name: unknown-redisdata

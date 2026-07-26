@@ -1,0 +1,62 @@
+{
+  "expo": {
+    "name": "Unknown",
+    "slug": "unknown",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "unknown",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#07120C"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "android": {
+      "package": "co.uk.seemaai.unknown",
+      "googleServicesFile": "./google-services.json",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#07120C"
+      },
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.CAMERA",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.WAKE_LOCK",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.USE_FULL_SCREEN_INTENT",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MICROPHONE",
+        "android.permission.FOREGROUND_SERVICE_CAMERA"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-dev-client",
+      "expo-system-ui",
+      "@livekit/react-native-expo-plugin",
+      "@config-plugins/react-native-webrtc",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/adaptive-icon.png",
+          "color": "#4ADE80"
+        }
+      ]
+    ],
+    "extra": {
+      "apiBaseUrl": "https://api.seemaai.co.uk/v1",
+      "wsBaseUrl": "wss://api.seemaai.co.uk",
+      "livekitUrl": "wss://rtc.seemaai.co.uk",
+      "eas": {
+        "projectId": "f86eaf8a-5744-46e1-9849-ca03ceb5da98"
+      }
+    },
+    "owner": "faizanali2k05"
+  }
+}

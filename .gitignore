@@ -1,0 +1,35 @@
+# ---------- Secrets — never commit ----------
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.p8
+*.p12
+*.jks
+*.keystore
+# NOTE: google-services.json is deliberately NOT ignored. It is not a secret
+# (it ships inside every Android APK) and EAS Build needs it to configure FCM.
+
+# ---------- Node ----------
+node_modules/
+dist/
+build/
+coverage/
+*.log
+npm-debug.log*
+
+# ---------- Expo / Android ----------
+apps/mobile/.expo/
+apps/mobile/android/
+apps/mobile/ios/
+apps/mobile/dist/
+
+# ---------- Docker runtime data ----------
+infra/data/
+
+# ---------- OS / editor ----------
+.DS_Store
+Thumbs.db
+.idea/
+*.swp

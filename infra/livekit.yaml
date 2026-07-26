@@ -1,0 +1,16 @@
+port: 7880
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 50100
+  use_external_ip: true
+keys:
+  unknown_dev_key: 653bd4b11d3783f4da1aff14e13686200ded02e9bfdd62f17cdc2236a9935651
+turn:
+  enabled: false
+logging:
+  level: info
+room:
+  auto_create: true
+  empty_timeout: 120
+  max_participants: 8

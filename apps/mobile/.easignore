@@ -1,0 +1,8 @@
+# Not uploaded to EAS Build. google-services.json is deliberately absent from
+# this list — the Android build needs it to wire up FCM.
+node_modules/
+.expo/
+android/
+ios/
+dist/
+*.log
