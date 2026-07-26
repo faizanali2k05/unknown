@@ -13,7 +13,9 @@
       "resizeMode": "contain",
       "backgroundColor": "#07120C"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "android": {
       "package": "co.uk.seemaai.unknown",
       "googleServicesFile": "./google-services.json",
@@ -32,7 +34,9 @@
         "android.permission.USE_FULL_SCREEN_INTENT",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MICROPHONE",
-        "android.permission.FOREGROUND_SERVICE_CAMERA"
+        "android.permission.FOREGROUND_SERVICE_CAMERA",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.BLUETOOTH"
       ]
     },
     "plugins": [
@@ -53,8 +57,9 @@
       "apiBaseUrl": "https://api.seemaai.co.uk/v1",
       "wsBaseUrl": "wss://api.seemaai.co.uk",
       "livekitUrl": "wss://rtc.seemaai.co.uk",
+      "router": {},
       "eas": {
-        "projectId": "f86eaf8a-5744-46e1-9849-ca03ceb5da98"
+        "projectId": "a5042bc8-45bf-4b45-a4ce-a30d5f2fd1ca"
       }
     },
     "owner": "faizanali2k05"
