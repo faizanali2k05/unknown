@@ -5,15 +5,19 @@ import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
-import { registerGlobals } from '@livekit/react-native';
+import { Platform } from 'react-native';
 import { ThemeProvider, useTheme } from '../src/theme';
 import { AuthProvider, useAuth } from '../src/store/auth';
 import { on } from '../src/api/socket';
 
-// WebRTC needs its globals installed before ANY LiveKit code runs. This is the
-// app's first module, so it is the right place. Without it, opening the call
-// screen crashes the app outright.
-registerGlobals();
+// WebRTC needs its globals installed before ANY LiveKit code runs, and this is
+// the app's first module. The require is deferred rather than imported at the
+// top so the browser never evaluates the native module — on web it throws
+// (`requireNativeComponent is not a function`) and takes the whole UI down.
+if (Platform.OS !== 'web') {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  (require('@livekit/react-native') as typeof import('@livekit/react-native')).registerGlobals();
+}
 
 /** Sends the user to the right stack once auth state is known. */
 function AuthGate({ children }: { children: React.ReactNode }) {
