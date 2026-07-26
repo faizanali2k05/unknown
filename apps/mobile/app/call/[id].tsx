@@ -185,7 +185,7 @@ function ActiveCall({
       {!showRemote ? <Avatar name={peerName} size={132} /> : <View />}
 
       {showLocal ? (
-        <VideoTrack trackRef={local} style={s.pip} objectFit="cover" mirror />
+        <VideoTrack trackRef={local} style={s.pip} objectFit="cover" />
       ) : null}
 
       <View style={s.controls}>

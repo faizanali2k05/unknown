@@ -9,10 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
 import { AuthUser } from '../decorators/current-user.decorator';
 
-/**
- * Verifies the access JWT on `Authorization: Bearer` and attaches the
- * principal to req.user. Guards every protected REST route.
- */
+/** Verifies the access JWT and attaches the principal to req.user. */
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
   constructor(
@@ -29,13 +26,11 @@ export class JwtAuthGuard implements CanActivate {
       const payload = await this.jwt.verifyAsync(token, {
         secret: this.config.get<string>('jwt.accessSecret'),
       });
-      const user: AuthUser = {
+      (req as Request & { user: AuthUser }).user = {
         userId: payload.sub,
         username: payload.username,
         displayName: payload.name,
-        isAdmin: !!payload.admin,
       };
-      (req as Request & { user: AuthUser }).user = user;
       return true;
     } catch {
       throw new UnauthorizedException('Invalid or expired access token');

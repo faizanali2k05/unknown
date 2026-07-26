@@ -5,9 +5,15 @@ import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
+import { registerGlobals } from '@livekit/react-native';
 import { ThemeProvider, useTheme } from '../src/theme';
 import { AuthProvider, useAuth } from '../src/store/auth';
 import { on } from '../src/api/socket';
+
+// WebRTC needs its globals installed before ANY LiveKit code runs. This is the
+// app's first module, so it is the right place. Without it, opening the call
+// screen crashes the app outright.
+registerGlobals();
 
 /** Sends the user to the right stack once auth state is known. */
 function AuthGate({ children }: { children: React.ReactNode }) {
@@ -75,7 +81,6 @@ function Root() {
             options={{ headerShown: false, presentation: 'fullScreenModal' }}
           />
           <Stack.Screen name="new-group" options={{ title: 'New group' }} />
-          <Stack.Screen name="invites" options={{ title: 'Invite codes' }} />
         </Stack>
       </AuthGate>
     </>

@@ -78,7 +78,7 @@ export default function Login() {
         <Link href="/(auth)/register" asChild>
           <Pressable style={{ marginTop: spacing.xl, alignItems: 'center' }}>
             <Text style={[typography.body, { color: t.text.secondary }]}>
-              Have an invite code?{' '}
+New here?{' '}
               <Text style={{ color: t.accent.default, fontWeight: '700' }}>Create account</Text>
             </Text>
           </Pressable>

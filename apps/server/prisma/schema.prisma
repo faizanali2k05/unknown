@@ -54,9 +54,6 @@ model User {
   statusText   String?   @map("status_text")
   lastSeenAt   DateTime? @map("last_seen_at") @db.Timestamptz
   isActive     Boolean   @default(true) @map("is_active")
-  // Admins mint invite codes. Not in the base spec, but registration is
-  // invite-only so someone has to be allowed to create them.
-  isAdmin      Boolean   @default(false) @map("is_admin")
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
 
   memberships    ConversationMember[]
@@ -65,8 +62,6 @@ model User {
   callsInitiated Call[]               @relation("CallInitiator")
   devices        Device[]
   refreshTokens  RefreshToken[]
-  invitesCreated InviteCode[]         @relation("InviteCreator")
-  inviteUsed     InviteCode?          @relation("InviteRedeemer")
 
   @@map("users")
 }
@@ -88,23 +83,6 @@ model RefreshToken {
 
   @@index([userId])
   @@map("refresh_tokens")
-}
-
-/// Registration is invite-only: an admin generates a code, one code = one user.
-model InviteCode {
-  id           String    @id @default(uuid()) @db.Uuid
-  code         String    @unique
-  createdById  String    @map("created_by") @db.Uuid
-  redeemedById String?   @unique @map("redeemed_by") @db.Uuid
-  redeemedAt   DateTime? @map("redeemed_at") @db.Timestamptz
-  expiresAt    DateTime? @map("expires_at") @db.Timestamptz
-  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
-
-  createdBy  User  @relation("InviteCreator", fields: [createdById], references: [id], onDelete: Cascade)
-  redeemedBy User? @relation("InviteRedeemer", fields: [redeemedById], references: [id], onDelete: SetNull)
-
-  @@index([createdById])
-  @@map("invite_codes")
 }
 
 // -----------------------------------------------------------------------------

@@ -29,7 +29,6 @@ export interface User {
   status_text: string | null;
   last_seen_at?: string | null;
   online?: boolean;
-  is_admin?: boolean;
 }
 
 export interface Conversation {
@@ -196,11 +195,11 @@ async function request<T>(
 
 export const api = {
   // Auth
-  register: (invite_code: string, username: string, password: string, display_name: string) =>
+  register: (username: string, password: string, display_name: string) =>
     request<{ user: User; tokens: Tokens }>('/auth/register', {
       method: 'POST',
       auth: false,
-      body: { invite_code, username, password, display_name },
+      body: { username, password, display_name },
     }),
   login: (username: string, password: string) =>
     request<{ user: User; tokens: Tokens }>('/auth/login', {
@@ -210,10 +209,6 @@ export const api = {
     }),
   logout: (refresh_token: string) =>
     request<void>('/auth/logout', { method: 'POST', auth: false, body: { refresh_token } }),
-  createInvites: (count: number) =>
-    request<{ codes: string[] }>('/auth/invites', { method: 'POST', body: { count } }),
-  listInvites: () =>
-    request<{ code: string; used: boolean; used_by: string | null }[]>('/auth/invites'),
 
   // Users
   me: () => request<User>('/users/me'),

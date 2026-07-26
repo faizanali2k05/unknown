@@ -1,15 +1,7 @@
-import { Body, Controller, Get, HttpCode, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, HttpCode, Post } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
-import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
-import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
-import {
-  RegisterDto,
-  LoginDto,
-  RefreshDto,
-  LogoutDto,
-  CreateInviteDto,
-} from './dto/auth.dto';
+import { RegisterDto, LoginDto, RefreshDto, LogoutDto } from './dto/auth.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -37,19 +29,5 @@ export class AuthController {
   @HttpCode(204)
   async logout(@Body() dto: LogoutDto): Promise<void> {
     await this.auth.logout(dto.refresh_token);
-  }
-
-  // ---- Invite codes (admin only) -------------------------------------------
-
-  @UseGuards(JwtAuthGuard)
-  @Post('invites')
-  createInvites(@CurrentUser() user: AuthUser, @Body() dto: CreateInviteDto) {
-    return this.auth.createInvites(user.userId, dto);
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Get('invites')
-  listInvites(@CurrentUser() user: AuthUser) {
-    return this.auth.listInvites(user.userId);
   }
 }

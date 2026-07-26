@@ -62,6 +62,30 @@ services:
       retries: 5
 
   # ---------------------------------------------------------------------------
+  #  MinIO — self-hosted S3-compatible storage for avatars and message media.
+  #  The S3 API is published on the docker bridge gateway so Caddy can serve
+  #  presigned URLs at media.<domain>; the admin console is never published.
+  # ---------------------------------------------------------------------------
+  unknown-minio:
+    image: minio/minio:latest
+    container_name: unknown-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY}
+    volumes:
+      - unknown-miniodata:/data
+    networks: [unknown-net]
+    ports:
+      - "${MINIO_BIND_ADDR:-172.17.0.1}:${MINIO_HOST_PORT:-9100}:9000"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
   #  NestJS API + Socket.IO gateway.
   #  Published ONLY on the docker bridge gateway so Caddy can reach it.
   # ---------------------------------------------------------------------------
@@ -76,6 +100,7 @@ services:
     depends_on:
       unknown-postgres: { condition: service_healthy }
       unknown-redis: { condition: service_healthy }
+      unknown-minio: { condition: service_healthy }
     networks: [unknown-net]
     ports:
       - "${API_BIND_ADDR:-172.17.0.1}:${API_HOST_PORT:-8100}:${API_PORT:-3000}"
@@ -100,3 +125,5 @@ volumes:
     name: unknown-pgdata
   unknown-redisdata:
     name: unknown-redisdata
+  unknown-miniodata:
+    name: unknown-miniodata

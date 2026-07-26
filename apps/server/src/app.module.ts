@@ -16,6 +16,7 @@ import { ConversationsModule } from './conversations/conversations.module';
 import { MessagesModule } from './messages/messages.module';
 import { CallsModule } from './calls/calls.module';
 import { DevicesModule } from './devices/devices.module';
+import { MediaModule } from './media/media.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { DevicesModule } from './devices/devices.module';
     MessagesModule,
     CallsModule,
     DevicesModule,
+    MediaModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

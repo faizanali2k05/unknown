@@ -3,7 +3,6 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { UpdateProfileDto } from './dto/users.dto';
 
-/** Shape returned to clients for any user. */
 export interface UserDto {
   id: string;
   username: string;
@@ -24,11 +23,7 @@ export class UsersService {
   async me(userId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
-    return {
-      ...(await this.toDto(user)),
-      is_admin: user.isAdmin,
-      created_at: user.createdAt,
-    };
+    return { ...(await this.toDto(user)), created_at: user.createdAt };
   }
 
   async updateProfile(userId: string, dto: UpdateProfileDto) {
@@ -44,8 +39,8 @@ export class UsersService {
   }
 
   /**
-   * The team directory. Everyone in a <50-person org can see everyone, so an
-   * empty query returns the whole (active) list rather than nothing.
+   * Team directory. Everyone can see everyone in an org this size, so an empty
+   * query returns the whole active list rather than nothing.
    */
   async directory(currentUserId: string, q?: string): Promise<UserDto[]> {
     const query = q?.trim();
@@ -74,7 +69,7 @@ export class UsersService {
     return this.toDto(user);
   }
 
-  /** Called by the socket gateway on disconnect. */
+  /** Called by the socket gateway when a user's last socket drops. */
   async touchLastSeen(userId: string): Promise<void> {
     await this.prisma.user
       .update({ where: { id: userId }, data: { lastSeenAt: new Date() } })

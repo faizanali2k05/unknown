@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
 import { useTheme, spacing, radius, typography, ThemePreference } from '../../src/theme';
 import { Avatar, Button, Field, Icon } from '../../src/components/ui';
 import { useAuth } from '../../src/store/auth';
@@ -9,7 +8,6 @@ import { api } from '../../src/api';
 export default function Profile() {
   const { t, preference, setPreference } = useTheme();
   const { user, signOut, refresh } = useAuth();
-  const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [displayName, setDisplayName] = useState(user?.display_name ?? '');
   const [statusText, setStatusText] = useState(user?.status_text ?? '');
@@ -99,12 +97,6 @@ export default function Profile() {
           })}
         </View>
       </Section>
-
-      {user.is_admin ? (
-        <Section title="Admin">
-          <Row icon="key-outline" label="Invite codes" onPress={() => router.push('/invites')} />
-        </Section>
-      ) : null}
 
       <View style={{ padding: spacing.xl }}>
         <Button label="Sign out" variant="danger" onPress={signOut} />

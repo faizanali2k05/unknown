@@ -1,20 +1,6 @@
-import {
-  IsInt,
-  IsOptional,
-  IsString,
-  Matches,
-  MaxLength,
-  Min,
-  MinLength,
-} from 'class-validator';
+import { IsString, Matches, MaxLength, MinLength } from 'class-validator';
 
 export class RegisterDto {
-  /** Registration is invite-only — an admin mints these. */
-  @IsString()
-  @MinLength(6)
-  @MaxLength(64)
-  invite_code!: string;
-
   @IsString()
   @MinLength(3)
   @MaxLength(32)
@@ -52,18 +38,4 @@ export class RefreshDto {
 export class LogoutDto {
   @IsString()
   refresh_token!: string;
-}
-
-export class CreateInviteDto {
-  /** How many codes to mint in one go. */
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  count?: number;
-
-  /** Optional expiry in days. Omit for a code that never expires. */
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  expires_in_days?: number;
 }

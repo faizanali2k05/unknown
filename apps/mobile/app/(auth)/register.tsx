@@ -11,7 +11,6 @@ import { ApiError } from '../../src/api';
 export default function Register() {
   const { t } = useTheme();
   const { signUp } = useAuth();
-  const [invite, setInvite] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -22,7 +21,7 @@ export default function Register() {
     setError(null);
     setBusy(true);
     try {
-      await signUp(invite.trim().toUpperCase(), username.trim(), password, displayName.trim());
+      await signUp(username.trim(), password, displayName.trim());
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Could not create account');
     } finally {
@@ -41,18 +40,9 @@ export default function Register() {
           Create account
         </Text>
         <Text style={[typography.body, { color: t.text.secondary, marginBottom: spacing.xl }]}>
-          You need an invite code from your admin.
+Pick a username and you're in.
         </Text>
 
-        <Field
-          label="Invite code"
-          icon="key-outline"
-          autoCapitalize="characters"
-          autoCorrect={false}
-          placeholder="XXXXX-XXXXX"
-          value={invite}
-          onChangeText={setInvite}
-        />
         <Field
           label="Your name"
           icon="happy-outline"

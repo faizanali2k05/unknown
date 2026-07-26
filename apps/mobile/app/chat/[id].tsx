@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { FlatList, Pressable, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme, spacing, radius, typography } from '../../src/theme';
 import { Icon } from '../../src/components/ui';
 import { api, Message } from '../../src/api';
@@ -27,6 +28,7 @@ export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState('');
   const [peerTyping, setPeerTyping] = useState(false);
+  const insets = useSafeAreaInsets();
   const listRef = useRef<FlatList<Message>>(null);
   const typingSent = useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingClear = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -152,7 +154,7 @@ export default function Chat() {
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: t.bg.primary }}
       behavior="padding"
-      keyboardVerticalOffset={92}
+      keyboardVerticalOffset={0}
     >
       <FlatList
         ref={listRef}
@@ -254,7 +256,11 @@ export default function Chat() {
           flexDirection: 'row',
           alignItems: 'flex-end',
           gap: spacing.sm,
-          padding: spacing.md,
+          paddingHorizontal: spacing.md,
+          paddingTop: spacing.md,
+          // Clear the Android gesture bar / nav buttons; the fallback keeps a
+          // comfortable gap on devices that report no inset.
+          paddingBottom: spacing.md + (insets.bottom > 0 ? insets.bottom : spacing.xs),
           borderTopWidth: 1,
           borderTopColor: t.border.default,
           backgroundColor: t.bg.secondary,

@@ -16,7 +16,6 @@ interface TokenUser {
   id: string;
   username: string;
   displayName: string;
-  isAdmin: boolean;
 }
 
 /**
@@ -34,12 +33,7 @@ export class TokensService {
 
   async issue(user: TokenUser): Promise<TokenPair> {
     const access_token = await this.jwt.signAsync(
-      {
-        sub: user.id,
-        username: user.username,
-        name: user.displayName,
-        admin: user.isAdmin,
-      },
+      { sub: user.id, username: user.username, name: user.displayName },
       {
         secret: this.config.get<string>('jwt.accessSecret'),
         expiresIn: this.config.get<string>('jwt.accessTtl'),
@@ -47,13 +41,11 @@ export class TokensService {
     );
 
     const refresh_token = randomBytes(48).toString('hex');
-    const tokenHash = await argon2.hash(refresh_token);
     const ttlDays = this.parseDays(this.config.get<string>('jwt.refreshTtl') ?? '30d');
-
     await this.prisma.refreshToken.create({
       data: {
         userId: user.id,
-        tokenHash,
+        tokenHash: await argon2.hash(refresh_token),
         expiresAt: new Date(Date.now() + ttlDays * 86_400_000),
       },
     });
@@ -66,11 +58,9 @@ export class TokensService {
     };
   }
 
-  /** Validate + rotate. Returns null if the token is unknown/expired/revoked. */
   async rotate(presented: string): Promise<TokenPair | null> {
     const match = await this.findActive(presented);
     if (!match) return null;
-
     await this.prisma.refreshToken.update({
       where: { id: match.id },
       data: { revokedAt: new Date() },
@@ -88,9 +78,9 @@ export class TokensService {
   }
 
   /**
-   * Refresh tokens are random, so we cannot look them up by value — we verify
-   * the presented token against the argon2 hashes of currently-active tokens.
-   * The active set stays small (one row per device, revoked on rotation).
+   * Refresh tokens are random, so they cannot be looked up by value — the
+   * presented token is verified against the hashes of currently-active rows.
+   * That set stays small: one per device, revoked on every rotation.
    */
   private async findActive(presented: string) {
     const candidates = await this.prisma.refreshToken.findMany({
