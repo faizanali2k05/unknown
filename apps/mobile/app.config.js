@@ -6,11 +6,11 @@
  * is gitignored — download it from the Firebase console if you need it:
  *   Firebase → Project settings → Your apps → Android → google-services.json
  *
- * newArchEnabled is false in app.json on purpose: @livekit/react-native and
- * @livekit/react-native-webrtc ship no codegenConfig, i.e. they are still
- * Paper-only native modules. Under Fabric their RTCView goes through the
- * interop layer and crashes the call screen. Re-enable only once LiveKit
- * declares New Architecture support.
+ * newArchEnabled must stay true: react-native-worklets fails the Gradle build
+ * outright without it ("Worklets require new architecture to be enabled") and
+ * Reanimated 4 is New-Architecture-only. LiveKit is still a Paper module, so
+ * its RTCView runs through Fabric's interop layer — that is fine, but it means
+ * the call screen has to be tested on a device after any LiveKit upgrade.
  *
  * Create/replace the EAS secret with:
  *   eas secret:create --scope project --name GOOGLE_SERVICES_JSON \
