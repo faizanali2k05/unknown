@@ -7,6 +7,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { Platform } from 'react-native';
 import { ThemeProvider, useTheme } from '../src/theme';
+import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { AuthProvider, useAuth } from '../src/store/auth';
 import { on } from '../src/api/socket';
 
@@ -94,15 +95,17 @@ function Root() {
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
+      <ErrorBoundary>
+        <SafeAreaProvider>
         <KeyboardProvider>
           <ThemeProvider>
             <AuthProvider>
               <Root />
             </AuthProvider>
           </ThemeProvider>
-        </KeyboardProvider>
-      </SafeAreaProvider>
+          </KeyboardProvider>
+        </SafeAreaProvider>
+      </ErrorBoundary>
     </GestureHandlerRootView>
   );
 }

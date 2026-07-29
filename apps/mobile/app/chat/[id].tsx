@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { FlatList, Pressable, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+import { KeyboardAvoidingView, useKeyboardState } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useHeaderHeight } from '@react-navigation/elements';
 import { useTheme, spacing, radius, typography } from '../../src/theme';
 import { Icon } from '../../src/components/ui';
 import { api, Message } from '../../src/api';
@@ -29,6 +30,11 @@ export default function Chat() {
   const [text, setText] = useState('');
   const [peerTyping, setPeerTyping] = useState(false);
   const insets = useSafeAreaInsets();
+  // KeyboardAvoidingView measures from the window top, but this screen starts
+  // below the native header — without that offset the composer ends up behind
+  // the keyboard by exactly the header's height.
+  const headerHeight = useHeaderHeight();
+  const keyboard = useKeyboardState();
   const listRef = useRef<FlatList<Message>>(null);
   const typingSent = useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingClear = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -154,7 +160,7 @@ export default function Chat() {
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: t.bg.primary }}
       behavior="padding"
-      keyboardVerticalOffset={0}
+      keyboardVerticalOffset={headerHeight}
     >
       <FlatList
         ref={listRef}
@@ -260,7 +266,11 @@ export default function Chat() {
           paddingTop: spacing.md,
           // Clear the Android gesture bar / nav buttons; the fallback keeps a
           // comfortable gap on devices that report no inset.
-          paddingBottom: spacing.md + (insets.bottom > 0 ? insets.bottom : spacing.xs),
+          // Clear the gesture bar when the keyboard is down. With it up the
+          // KeyboardAvoidingView already supplies the offset, so adding the
+          // inset again would leave a visible gap above the keyboard.
+          paddingBottom:
+            spacing.md + (keyboard.isVisible ? 0 : insets.bottom > 0 ? insets.bottom : spacing.xs),
           borderTopWidth: 1,
           borderTopColor: t.border.default,
           backgroundColor: t.bg.secondary,

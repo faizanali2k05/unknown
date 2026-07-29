@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { PermissionsAndroid, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   AudioSession,
@@ -12,9 +12,31 @@ import {
 } from '@livekit/react-native';
 import { Track } from 'livekit-client';
 import { useTheme, spacing, typography } from '../theme';
-import { Avatar, Icon, IconName } from '../components/ui';
+import { Avatar, Button, Icon, IconName } from '../components/ui';
 import { api, LIVEKIT_URL } from '../api';
 import { on } from '../api/socket';
+
+type PermState = 'checking' | 'granted' | 'denied';
+
+/**
+ * Requests the runtime permissions LiveKit needs.
+ *
+ * Declaring RECORD_AUDIO/CAMERA in the manifest is not enough on Android 6+ —
+ * they are "dangerous" permissions and must be granted at runtime. Without
+ * this the native capturer throws the moment a room connects, which takes the
+ * whole app down rather than surfacing an error.
+ */
+async function requestCallPermissions(video: boolean): Promise<boolean> {
+  if (Platform.OS !== 'android') return true;
+  const needed = [PermissionsAndroid.PERMISSIONS.RECORD_AUDIO];
+  if (video) needed.push(PermissionsAndroid.PERMISSIONS.CAMERA);
+  try {
+    const result = await PermissionsAndroid.requestMultiple(needed);
+    return needed.every((p) => result[p] === PermissionsAndroid.RESULTS.GRANTED);
+  } catch {
+    return false;
+  }
+}
 
 export default function CallScreen() {
   const { t } = useTheme();
@@ -34,13 +56,26 @@ export default function CallScreen() {
 
   const [token, setToken] = useState<string | null>(params.token ?? null);
   const [status, setStatus] = useState(incoming ? 'Incoming call' : 'Calling…');
+  const [perm, setPerm] = useState<PermState>('checking');
+
+  // Ask before any LiveKit code touches the mic/camera.
+  useEffect(() => {
+    let alive = true;
+    requestCallPermissions(isVideo).then((ok) => {
+      if (alive) setPerm(ok ? 'granted' : 'denied');
+    });
+    return () => {
+      alive = false;
+    };
+  }, [isVideo]);
 
   useEffect(() => {
+    if (perm !== 'granted') return;
     AudioSession.startAudioSession().catch(() => undefined);
     return () => {
       AudioSession.stopAudioSession().catch(() => undefined);
     };
-  }, []);
+  }, [perm]);
 
   const leave = useCallback(
     (msg: string) => {
@@ -81,17 +116,30 @@ export default function CallScreen() {
     router.back();
   };
 
-  // Ringing screen — before we have a room token.
+  // --- Permission gates ----------------------------------------------------
+  if (perm === 'checking') {
+    return (
+      <Shell peerName={peerName} sub="Checking permissions…">
+        <View />
+      </Shell>
+    );
+  }
+
+  if (perm === 'denied') {
+    return (
+      <Shell
+        peerName={peerName}
+        sub={`Unknown needs your microphone${isVideo ? ' and camera' : ''} to place calls. Enable it in Settings → Apps → Unknown → Permissions.`}
+      >
+        <Button label="Go back" variant="ghost" onPress={() => router.back()} />
+      </Shell>
+    );
+  }
+
+  // --- Ringing (no room token yet) -----------------------------------------
   if (!token) {
     return (
-      <View style={[s.root, { backgroundColor: t.bg.primary }]}>
-        <View style={s.top}>
-          <Text style={[typography.display, { color: t.text.primary }]}>{peerName}</Text>
-          <Text style={[typography.body, { color: t.text.secondary, marginTop: spacing.sm }]}>
-            {isVideo ? 'Video call' : 'Voice call'} · {status}
-          </Text>
-        </View>
-        <Avatar name={peerName} size={132} />
+      <Shell peerName={peerName} sub={`${isVideo ? 'Video call' : 'Voice call'} · ${status}`}>
         <View style={s.controls}>
           {incoming ? (
             <>
@@ -107,7 +155,7 @@ export default function CallScreen() {
             <CallBtn colour={t.status.danger} icon="call" label="Cancel" onPress={hangUp} />
           )}
         </View>
-      </View>
+      </Shell>
     );
   }
 
@@ -122,6 +170,37 @@ export default function CallScreen() {
     >
       <ActiveCall peerName={peerName} isVideo={isVideo} onHangUp={hangUp} />
     </LiveKitRoom>
+  );
+}
+
+/** Shared frame for every pre-connected state. */
+function Shell({
+  peerName,
+  sub,
+  children,
+}: {
+  peerName: string;
+  sub: string;
+  children: React.ReactNode;
+}) {
+  const { t } = useTheme();
+  return (
+    <View style={[s.root, { backgroundColor: t.bg.primary }]}>
+      <View style={s.top}>
+        <Text style={[typography.display, { color: t.text.primary }]}>{peerName}</Text>
+        <Text
+          style={[
+            typography.body,
+            { color: t.text.secondary, marginTop: spacing.sm, textAlign: 'center' },
+          ]}
+        >
+          {sub}
+        </Text>
+      </View>
+      <Avatar name={peerName} size={132} />
+      {children}
+      <Text style={[typography.caption, { color: t.text.muted }]}>End-to-end over your server</Text>
+    </View>
   );
 }
 
@@ -143,12 +222,10 @@ function ActiveCall({
   const [seconds, setSeconds] = useState(0);
   const [muted, setMuted] = useState(false);
   const [camOff, setCamOff] = useState(!isVideo);
-  const started = useRef(false);
 
-  // The timer starts when the other side actually joins, so both ends agree.
+  // Timer starts when the other side actually joins, so both ends agree.
   useEffect(() => {
     if (!connected) return;
-    started.current = true;
     const h = setInterval(() => setSeconds((x) => x + 1), 1000);
     return () => clearInterval(h);
   }, [connected]);
@@ -183,10 +260,7 @@ function ActiveCall({
       </View>
 
       {!showRemote ? <Avatar name={peerName} size={132} /> : <View />}
-
-      {showLocal ? (
-        <VideoTrack trackRef={local} style={s.pip} objectFit="cover" />
-      ) : null}
+      {showLocal ? <VideoTrack trackRef={local} style={s.pip} objectFit="cover" /> : null}
 
       <View style={s.controls}>
         <SmallBtn
@@ -196,7 +270,7 @@ function ActiveCall({
           onPress={async () => {
             const next = !muted;
             setMuted(next);
-            await localParticipant.setMicrophoneEnabled(!next);
+            await localParticipant.setMicrophoneEnabled(!next).catch(() => undefined);
           }}
         />
         <CallBtn colour={t.status.danger} icon="call" label="End" onPress={onHangUp} />
@@ -208,7 +282,7 @@ function ActiveCall({
             onPress={async () => {
               const next = !camOff;
               setCamOff(next);
-              await localParticipant.setCameraEnabled(!next);
+              await localParticipant.setCameraEnabled(!next).catch(() => undefined);
             }}
           />
         ) : (
@@ -273,8 +347,7 @@ function SmallBtn({
 
 function formatTimer(s: number): string {
   const m = Math.floor(s / 60);
-  const sec = s % 60;
-  return `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+  return `${m.toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
 }
 
 const s = StyleSheet.create({
@@ -283,6 +356,7 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: spacing.xxxl,
+    paddingHorizontal: spacing.xl,
   },
   top: { alignItems: 'center', marginTop: spacing.xxxl },
   topOnVideo: {

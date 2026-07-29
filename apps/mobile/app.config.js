@@ -6,6 +6,12 @@
  * is gitignored — download it from the Firebase console if you need it:
  *   Firebase → Project settings → Your apps → Android → google-services.json
  *
+ * newArchEnabled is false in app.json on purpose: @livekit/react-native and
+ * @livekit/react-native-webrtc ship no codegenConfig, i.e. they are still
+ * Paper-only native modules. Under Fabric their RTCView goes through the
+ * interop layer and crashes the call screen. Re-enable only once LiveKit
+ * declares New Architecture support.
+ *
  * Create/replace the EAS secret with:
  *   eas secret:create --scope project --name GOOGLE_SERVICES_JSON \
  *     --type file --value ./google-services.json --force
