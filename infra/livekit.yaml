@@ -1,16 +1,32 @@
+# =============================================================================
+#  LiveKit SFU config. Rendered from infra/.env by scripts/deploy-livekit.sh —
+#  edit that script, not this file, or the next deploy will overwrite you.
+#
+#  Ports here must match the UFW rules that are already in place:
+#    7880/tcp  signalling  (bridge only; Caddy proxies it as wss://rtc.<domain>)
+#    7881/tcp  ICE/TCP fallback (public)
+#    50000-50100/udp  media (public)
+# =============================================================================
+
 port: 7880
+
 rtc:
   tcp_port: 7881
   port_range_start: 50000
   port_range_end: 50100
+  # Discover the public IP so ICE candidates are reachable from mobile networks.
   use_external_ip: true
+
 keys:
-  unknown_dev_key: 653bd4b11d3783f4da1aff14e13686200ded02e9bfdd62f17cdc2236a9935651
-turn:
-  enabled: false
-logging:
-  level: info
+  # Filled in at deploy time from LIVEKIT_API_KEY / LIVEKIT_API_SECRET.
+  __API_KEY__: __API_SECRET__
+
 room:
   auto_create: true
+  # Rooms are created per call and abandoned once both sides hang up.
   empty_timeout: 120
+  departure_timeout: 20
   max_participants: 8
+
+logging:
+  level: info

@@ -115,6 +115,27 @@ services:
       retries: 5
       start_period: 40s
 
+  # ---------------------------------------------------------------------------
+  #  LiveKit SFU — every call is relayed through it.
+  #
+  #  Host networking, because WebRTC needs to advertise the real public IP and
+  #  hand out a UDP media range; going through a bridge would break ICE.
+  #  Signalling (7880) is only reachable from the docker bridge — Caddy proxies
+  #  it as wss://rtc.<domain>. The media ports must be public, and the UFW rules
+  #  for them already exist.
+  #
+  #  No coturn: at this scale LiveKit itself is the relay, so a separate TURN
+  #  server would add a moving part without adding reachability.
+  # ---------------------------------------------------------------------------
+  unknown-livekit:
+    image: livekit/livekit-server:latest
+    container_name: unknown-livekit
+    restart: unless-stopped
+    command: ["--config", "/etc/livekit.yaml"]
+    network_mode: host
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+
 networks:
   unknown-net:
     name: unknown-net
