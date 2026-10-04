@@ -6,9 +6,9 @@ const extra = (Constants.expoConfig?.extra ?? {}) as {
   wsBaseUrl?: string;
   livekitUrl?: string;
 };
-export const API_BASE_URL = extra.apiBaseUrl ?? 'https://api.seemaai.co.uk/v1';
-export const WS_BASE_URL = extra.wsBaseUrl ?? 'wss://api.seemaai.co.uk';
-export const LIVEKIT_URL = extra.livekitUrl ?? 'wss://rtc.seemaai.co.uk';
+export const API_BASE_URL = extra.apiBaseUrl ?? 'https://unknown.5kassi.com/v1';
+export const WS_BASE_URL = extra.wsBaseUrl ?? 'wss://unknown.5kassi.com';
+export const LIVEKIT_URL = extra.livekitUrl ?? 'wss://unknown.5kassi.com';
 
 // ---------------------------------------------------------------------------
 //  Types (mirrors packages/shared)
@@ -22,7 +22,7 @@ export interface Tokens {
 }
 
 export interface User {
-  id: string;
+  public_id: string;
   username: string;
   display_name: string;
   avatar_url: string | null;
@@ -36,14 +36,14 @@ export interface Conversation {
   type: 'direct' | 'group';
   title: string;
   avatar_url: string | null;
-  peer_user_id: string | null;
+  peer_public_id: string | null;
   member_count: number;
   unread_count: number;
   last_message: {
     id: string;
     type: string;
     body: string | null;
-    sender_id: string | null;
+    sender_public_id: string | null;
     created_at: string;
   } | null;
   updated_at: string;
@@ -55,7 +55,7 @@ export interface Message {
   id: string;
   client_id: string;
   conversation_id: string;
-  sender_id: string | null;
+  sender_public_id: string | null;
   type: 'text' | 'image' | 'voice' | 'file' | 'system';
   body: string | null;
   media_url: string | null;
@@ -73,11 +73,21 @@ export interface CallRecord {
   direction: 'incoming' | 'outgoing';
   title: string;
   avatar_url: string | null;
-  peer_user_id: string | null;
+  peer_public_id: string | null;
   started_at: string;
+  answered_at: string | null;
   ended_at: string | null;
   end_reason: string | null;
+  status: 'ringing' | 'answered' | 'rejected' | 'missed' | 'ended' | 'failed';
   duration_sec: number | null;
+}
+
+export interface MeetingJoin {
+  meeting_code: string;
+  token: string;
+  expires_at: string;
+  is_creator: boolean;
+  creator_name?: string;
 }
 
 export interface ConversationDetail {
@@ -86,7 +96,7 @@ export interface ConversationDetail {
   title: string;
   avatar_url: string | null;
   members: {
-    user_id: string;
+    public_id: string;
     username: string;
     display_name: string;
     avatar_url: string | null;
@@ -107,7 +117,10 @@ let onUnauthorized: (() => void) | null = null;
 
 export const tokenStore = {
   async load(): Promise<void> {
-    const [[, a], [, r]] = await AsyncStorage.multiGet([ACCESS_KEY, REFRESH_KEY]);
+    const [[, a], [, r]] = await AsyncStorage.multiGet([
+      ACCESS_KEY,
+      REFRESH_KEY,
+    ]);
     accessToken = a;
     refreshToken = r;
   },
@@ -159,10 +172,17 @@ async function refreshAccess(): Promise<boolean> {
 
 async function request<T>(
   path: string,
-  opts: { method?: string; body?: unknown; auth?: boolean; _retry?: boolean } = {},
+  opts: {
+    method?: string;
+    body?: unknown;
+    auth?: boolean;
+    _retry?: boolean;
+  } = {},
 ): Promise<T> {
   const { method = 'GET', body, auth = true, _retry = false } = opts;
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
   if (auth && accessToken) headers.Authorization = `Bearer ${accessToken}`;
 
   const res = await fetch(`${API_BASE_URL}${path}`, {
@@ -172,7 +192,8 @@ async function request<T>(
   });
 
   if (res.status === 401 && auth && !_retry) {
-    if (await refreshAccess()) return request<T>(path, { ...opts, _retry: true });
+    if (await refreshAccess())
+      return request<T>(path, { ...opts, _retry: true });
     await tokenStore.clear();
     onUnauthorized?.();
     throw new ApiError(401, 'Session expired');
@@ -184,7 +205,10 @@ async function request<T>(
   const data = text ? JSON.parse(text) : undefined;
   if (!res.ok) {
     const m = data?.message;
-    throw new ApiError(res.status, Array.isArray(m) ? m.join(', ') : (m ?? `Error ${res.status}`));
+    throw new ApiError(
+      res.status,
+      Array.isArray(m) ? m.join(', ') : (m ?? `Error ${res.status}`),
+    );
   }
   return data as T;
 }
@@ -208,28 +232,84 @@ export const api = {
       body: { username, password },
     }),
   logout: (refresh_token: string) =>
-    request<void>('/auth/logout', { method: 'POST', auth: false, body: { refresh_token } }),
+    request<void>('/auth/logout', {
+      method: 'POST',
+      auth: false,
+      body: { refresh_token },
+    }),
 
   // Users
   me: () => request<User>('/users/me'),
-  updateMe: (patch: { display_name?: string; status_text?: string; avatar_url?: string }) =>
-    request<User>('/users/me', { method: 'PATCH', body: patch }),
-  directory: (q?: string) => request<User[]>(`/users${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  updateMe: (patch: {
+    display_name?: string;
+    status_text?: string;
+    avatar_url?: string;
+  }) => request<User>('/users/me', { method: 'PATCH', body: patch }),
+  lookupUser: (public_id: string) =>
+    request<{
+      public_id: string;
+      display_name: string;
+      avatar_url: string | null;
+    }>(`/users/lookup/${encodeURIComponent(public_id)}`),
+  friends: () => request<User[]>('/friends'),
+  friendRequests: (direction: 'incoming' | 'outgoing' = 'incoming') =>
+    request<{ direction: string; user: User; created_at: string }[]>(
+      `/friends/requests?direction=${direction}`,
+    ),
+  sendFriendRequest: (public_id: string) =>
+    request<{ sent: boolean }>('/friends/requests', {
+      method: 'POST',
+      body: { public_id },
+    }),
+  acceptFriendRequest: (public_id: string) =>
+    request<{ accepted: boolean }>(
+      `/friends/requests/${encodeURIComponent(public_id)}/accept`,
+      { method: 'POST' },
+    ),
+  rejectFriendRequest: (public_id: string) =>
+    request<{ updated: boolean }>(
+      `/friends/requests/${encodeURIComponent(public_id)}/reject`,
+      { method: 'POST' },
+    ),
+  cancelFriendRequest: (public_id: string) =>
+    request<{ updated: boolean }>(
+      `/friends/requests/${encodeURIComponent(public_id)}/cancel`,
+      { method: 'POST' },
+    ),
+  removeFriend: (public_id: string) =>
+    request<{ removed: boolean }>(`/friends/${encodeURIComponent(public_id)}`, {
+      method: 'DELETE',
+    }),
+  blockedUsers: () => request<User[]>('/friends/blocks'),
+  blockUser: (public_id: string) =>
+    request<{ blocked: boolean }>('/friends/blocks', {
+      method: 'POST',
+      body: { public_id },
+    }),
+  unblockUser: (public_id: string) =>
+    request<{ unblocked: boolean }>(
+      `/friends/blocks/${encodeURIComponent(public_id)}`,
+      { method: 'DELETE' },
+    ),
 
   // Conversations
   conversations: () => request<Conversation[]>('/conversations'),
-  directConversation: (peer_user_id: string) =>
-    request<{ id: string; type: string; title: string; peer_user_id: string }>(
-      '/conversations/direct',
-      { method: 'POST', body: { peer_user_id } },
-    ),
-  createGroup: (title: string, member_ids: string[]) =>
+  directConversation: (peer_public_id: string) =>
+    request<{
+      id: string;
+      type: string;
+      title: string;
+      peer_public_id: string;
+    }>('/conversations/direct', { method: 'POST', body: { peer_public_id } }),
+  createGroup: (title: string, member_public_ids: string[]) =>
     request<{ id: string; title: string }>('/conversations/group', {
       method: 'POST',
-      body: { title, member_ids },
+      body: { title, member_public_ids },
     }),
-  conversation: (id: string) => request<ConversationDetail>(`/conversations/${id}`),
-  markRead: (id: string) => request<void>(`/conversations/${id}/read`, { method: 'POST' }),
+  conversation: (id: string) =>
+    request<ConversationDetail>(`/conversations/${id}`),
+  markRead: (id: string) =>
+    request<void>(`/conversations/${id}/read`, { method: 'POST' }),
 
   // Messages
   history: (conversationId: string, before?: string) =>
@@ -244,22 +324,46 @@ export const api = {
       method: 'POST',
       body: payload,
     }),
-  deleteMessage: (id: string) => request<void>(`/messages/${id}`, { method: 'DELETE' }),
+  deleteMessage: (id: string) =>
+    request<void>(`/messages/${id}`, { method: 'DELETE' }),
 
   // Calls
   startCall: (conversation_id: string, kind: 'audio' | 'video') =>
-    request<{ call_id: string; room_name: string; kind: string; token: string }>('/calls', {
+    request<{
+      call_id: string;
+      room_name: string;
+      kind: string;
+      token: string;
+    }>('/calls', {
       method: 'POST',
       body: { conversation_id, kind },
     }),
   answerCall: (id: string) =>
-    request<{ call_id: string; room_name: string; kind: string; token: string }>(
-      `/calls/${id}/answer`,
-      { method: 'POST' },
-    ),
-  declineCall: (id: string) => request<void>(`/calls/${id}/decline`, { method: 'POST' }),
-  endCall: (id: string) => request<void>(`/calls/${id}/end`, { method: 'POST', body: {} }),
+    request<{
+      call_id: string;
+      room_name: string;
+      kind: string;
+      token: string;
+    }>(`/calls/${id}/answer`, { method: 'POST' }),
+  declineCall: (id: string) =>
+    request<void>(`/calls/${id}/decline`, { method: 'POST' }),
+  endCall: (id: string) =>
+    request<void>(`/calls/${id}/end`, { method: 'POST', body: {} }),
   callHistory: () => request<CallRecord[]>('/calls/history'),
+
+  // Meetings (links do not provide access unless the viewer is signed in).
+  createMeeting: () =>
+    request<MeetingJoin & { meeting_url: string | null }>('/meetings', {
+      method: 'POST',
+    }),
+  joinMeeting: (code: string) =>
+    request<MeetingJoin>(`/meetings/${encodeURIComponent(code)}/join`, {
+      method: 'POST',
+    }),
+  endMeeting: (code: string) =>
+    request<{ ended: boolean }>(`/meetings/${encodeURIComponent(code)}/end`, {
+      method: 'POST',
+    }),
 
   // Devices
   registerDevice: (fcm_token: string) =>

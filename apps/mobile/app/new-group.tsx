@@ -14,7 +14,10 @@ export default function NewGroup() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    api.directory().then(setPeople).catch(() => undefined);
+    api
+      .friends()
+      .then(setPeople)
+      .catch(() => undefined);
   }, []);
 
   const toggle = (id: string) =>
@@ -30,7 +33,10 @@ export default function NewGroup() {
     setBusy(true);
     try {
       const g = await api.createGroup(title.trim(), Array.from(selected));
-      router.replace({ pathname: '/chat/[id]', params: { id: g.id, title: g.title } });
+      router.replace({
+        pathname: '/chat/[id]',
+        params: { id: g.id, title: g.title },
+      });
     } finally {
       setBusy(false);
     }
@@ -39,7 +45,12 @@ export default function NewGroup() {
   return (
     <View style={{ flex: 1, backgroundColor: t.bg.primary }}>
       <View style={{ padding: spacing.lg }}>
-        <Field label="Group name" placeholder="Design Team" value={title} onChangeText={setTitle} />
+        <Field
+          label="Group name"
+          placeholder="Design Team"
+          value={title}
+          onChangeText={setTitle}
+        />
         <Text style={[typography.caption, { color: t.text.muted }]}>
           {selected.size} member{selected.size === 1 ? '' : 's'} selected
         </Text>
@@ -47,12 +58,12 @@ export default function NewGroup() {
 
       <FlatList
         data={people}
-        keyExtractor={(u) => u.id}
+        keyExtractor={(u) => u.public_id}
         renderItem={({ item }) => {
-          const on = selected.has(item.id);
+          const on = selected.has(item.public_id);
           return (
             <Pressable
-              onPress={() => toggle(item.id)}
+              onPress={() => toggle(item.public_id)}
               style={{
                 flexDirection: 'row',
                 alignItems: 'center',
@@ -66,7 +77,9 @@ export default function NewGroup() {
                 <Text style={[typography.heading, { color: t.text.primary }]}>
                   {item.display_name}
                 </Text>
-                <Text style={[typography.caption, { color: t.text.muted }]}>@{item.username}</Text>
+                <Text style={[typography.caption, { color: t.text.muted }]}>
+                  @{item.username}
+                </Text>
               </View>
               <Icon
                 name={on ? 'checkmark-circle' : 'ellipse-outline'}

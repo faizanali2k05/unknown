@@ -11,7 +11,10 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
-import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
+import {
+  CurrentUser,
+  AuthUser,
+} from '../common/decorators/current-user.decorator';
 import { ConversationsService } from './conversations.service';
 import { MessagesService } from '../messages/messages.service';
 import { SendMessageDto } from '../messages/dto/messages.dto';
@@ -37,7 +40,10 @@ export class ConversationsController {
 
   @Post('direct')
   direct(@CurrentUser() user: AuthUser, @Body() dto: CreateDirectDto) {
-    return this.conversations.findOrCreateDirect(user.userId, dto.peer_user_id);
+    return this.conversations.findOrCreateDirect(
+      user.userId,
+      dto.peer_public_id,
+    );
   }
 
   @Post('group')
@@ -65,23 +71,30 @@ export class ConversationsController {
     @Param('id') id: string,
     @Body() dto: MembersDto,
   ) {
-    return this.conversations.addMembers(user.userId, id, dto.member_ids);
+    return this.conversations.addMembers(
+      user.userId,
+      id,
+      dto.member_public_ids,
+    );
   }
 
-  @Delete(':id/members/:userId')
+  @Delete(':id/members/:publicId')
   @HttpCode(204)
   async removeMember(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
-    @Param('userId') targetUserId: string,
+    @Param('publicId') targetPublicId: string,
   ): Promise<void> {
-    await this.conversations.removeMember(user.userId, id, targetUserId);
+    await this.conversations.removeMember(user.userId, id, targetPublicId);
   }
 
   /** Marks the whole conversation read up to now. */
   @Post(':id/read')
   @HttpCode(204)
-  async read(@CurrentUser() user: AuthUser, @Param('id') id: string): Promise<void> {
+  async read(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+  ): Promise<void> {
     await this.conversations.markRead(user.userId, id);
   }
 

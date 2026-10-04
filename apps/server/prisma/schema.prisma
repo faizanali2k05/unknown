@@ -1,13 +1,13 @@
 // =============================================================================
-//  Unknown — internal team messaging & calling app.
+//  Unknown — private messaging, calling, contacts, and meeting app.
 //  Mirrors the SQL in CLAUDE.md. Two rules that drive the design:
 //    1. messages.clientId is generated ON THE DEVICE before send. It powers the
 //       offline queue, duplicate prevention and the sending→sent→delivered→read
 //       pipeline. The server is never the source of a message's identity.
 //    2. Read state lives in conversationMembers.lastReadAt — never a row per
 //       message per user.
-//  There is no "numbers"/display-number concept: this is a closed team app,
-//  people are identified by username + display name.
+//  User UUIDs remain internal; KASSI public IDs are the only way to find
+//  another account, and there is no public user directory.
 // =============================================================================
 
 generator client {
@@ -42,11 +42,34 @@ enum CallKind {
   video
 }
 
+enum CallStatus {
+  ringing
+  answered
+  rejected
+  missed
+  ended
+  failed
+}
+
+enum MeetingStatus {
+  active
+  ended
+  expired
+}
+
+enum FriendRequestStatus {
+  pending
+  accepted
+  rejected
+  cancelled
+}
+
 // -----------------------------------------------------------------------------
 //  User
 // -----------------------------------------------------------------------------
 model User {
   id           String    @id @default(uuid()) @db.Uuid
+  publicId     String    @unique @map("public_id") @db.VarChar(16)
   username     String    @unique
   passwordHash String    @map("password_hash")
   displayName  String    @map("display_name")
@@ -56,14 +79,64 @@ model User {
   isActive     Boolean   @default(true) @map("is_active")
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
 
-  memberships    ConversationMember[]
-  messages       Message[]            @relation("MessageSender")
-  conversations  Conversation[]       @relation("ConversationCreator")
-  callsInitiated Call[]               @relation("CallInitiator")
-  devices        Device[]
-  refreshTokens  RefreshToken[]
+  memberships            ConversationMember[]
+  messages               Message[]            @relation("MessageSender")
+  conversations          Conversation[]       @relation("ConversationCreator")
+  callsInitiated         Call[]               @relation("CallInitiator")
+  meetingsCreated        Meeting[]            @relation("MeetingCreator")
+  devices                Device[]
+  refreshTokens          RefreshToken[]
+  sentFriendRequests     FriendRequest[]      @relation("FriendRequestSender")
+  receivedFriendRequests FriendRequest[]      @relation("FriendRequestReceiver")
+  blocksSent             UserBlock[]          @relation("UserBlocker")
+  blocksReceived         UserBlock[]          @relation("UserBlocked")
+  friendshipsLow         Friendship[]         @relation("FriendshipLow")
+  friendshipsHigh        Friendship[]         @relation("FriendshipHigh")
 
   @@map("users")
+}
+
+model FriendRequest {
+  id         String              @id @default(uuid()) @db.Uuid
+  senderId   String              @map("sender_id") @db.Uuid
+  receiverId String              @map("receiver_id") @db.Uuid
+  status     FriendRequestStatus @default(pending)
+  createdAt  DateTime            @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime            @updatedAt @map("updated_at") @db.Timestamptz
+
+  sender   User @relation("FriendRequestSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver User @relation("FriendRequestReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@unique([senderId, receiverId])
+  @@index([receiverId, status, createdAt])
+  @@index([senderId, status, createdAt])
+  @@map("friend_requests")
+}
+
+model Friendship {
+  userLowId  String   @map("user_low_id") @db.Uuid
+  userHighId String   @map("user_high_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  userLow  User @relation("FriendshipLow", fields: [userLowId], references: [id], onDelete: Cascade)
+  userHigh User @relation("FriendshipHigh", fields: [userHighId], references: [id], onDelete: Cascade)
+
+  @@id([userLowId, userHighId])
+  @@index([userHighId])
+  @@map("friendships")
+}
+
+model UserBlock {
+  blockerId String   @map("blocker_id") @db.Uuid
+  blockedId String   @map("blocked_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  blocker User @relation("UserBlocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("UserBlocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@id([blockerId, blockedId])
+  @@index([blockedId])
+  @@map("user_blocks")
 }
 
 // -----------------------------------------------------------------------------
@@ -124,7 +197,7 @@ model ConversationMember {
 //  Messages
 // -----------------------------------------------------------------------------
 model Message {
-  id String @id @default(uuid()) @db.Uuid
+  id             String      @id @default(uuid()) @db.Uuid
   /// Generated on the device before send. Makes retries idempotent.
   clientId       String      @map("client_id") @db.Uuid
   conversationId String      @map("conversation_id") @db.Uuid
@@ -153,21 +226,39 @@ model Message {
 //  Calls — every call is relayed through LiveKit (team of <50, no P2P).
 // -----------------------------------------------------------------------------
 model Call {
-  id             String    @id @default(uuid()) @db.Uuid
-  conversationId String    @map("conversation_id") @db.Uuid
-  initiatorId    String?   @map("initiator_id") @db.Uuid
+  id             String     @id @default(uuid()) @db.Uuid
+  conversationId String     @map("conversation_id") @db.Uuid
+  initiatorId    String?    @map("initiator_id") @db.Uuid
   kind           CallKind
+  status         CallStatus @default(ringing)
   /// Random UUID — never derived from conversation or user ids.
-  roomName       String    @map("room_name")
-  startedAt      DateTime  @default(now()) @map("started_at") @db.Timestamptz
-  endedAt        DateTime? @map("ended_at") @db.Timestamptz
-  endReason      String?   @map("end_reason")
+  roomName       String     @map("room_name")
+  startedAt      DateTime   @default(now()) @map("started_at") @db.Timestamptz
+  answeredAt     DateTime?  @map("answered_at") @db.Timestamptz
+  endedAt        DateTime?  @map("ended_at") @db.Timestamptz
+  endReason      String?    @map("end_reason")
 
   conversation Conversation @relation(fields: [conversationId], references: [id])
   initiator    User?        @relation("CallInitiator", fields: [initiatorId], references: [id])
 
   @@index([conversationId, startedAt(sort: Desc)])
   @@map("calls")
+}
+
+model Meeting {
+  id          String        @id @default(uuid()) @db.Uuid
+  meetingCode String        @unique @map("meeting_code") @db.VarChar(24)
+  roomName    String        @unique @map("room_name")
+  createdById String        @map("created_by_id") @db.Uuid
+  status      MeetingStatus @default(active)
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  expiresAt   DateTime      @map("expires_at") @db.Timestamptz
+  endedAt     DateTime?     @map("ended_at") @db.Timestamptz
+
+  createdBy User @relation("MeetingCreator", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([status, expiresAt])
+  @@map("meetings")
 }
 
 // -----------------------------------------------------------------------------

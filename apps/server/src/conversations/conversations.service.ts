@@ -28,14 +28,48 @@ export class ConversationsService {
               where: { deletedAt: null },
               orderBy: { createdAt: 'desc' },
               take: 1,
+              include: { sender: { select: { publicId: true } } },
             },
           },
         },
       },
     });
 
+    const [friendships, blocks] = await Promise.all([
+      this.prisma.friendship.findMany({
+        where: { OR: [{ userLowId: userId }, { userHighId: userId }] },
+        select: { userLowId: true, userHighId: true },
+      }),
+      this.prisma.userBlock.findMany({
+        where: { OR: [{ blockerId: userId }, { blockedId: userId }] },
+        select: { blockerId: true, blockedId: true },
+      }),
+    ]);
+    const friendIds = new Set(
+      friendships.map((friendship: (typeof friendships)[number]) =>
+        friendship.userLowId === userId
+          ? friendship.userHighId
+          : friendship.userLowId,
+      ),
+    );
+    const blockedIds = new Set(
+      blocks.map((block: (typeof blocks)[number]) =>
+        block.blockerId === userId ? block.blockedId : block.blockerId,
+      ),
+    );
+    const visibleMemberships = memberships.filter(
+      (membership: (typeof memberships)[number]) => {
+        if (membership.conversation.type !== 'direct') return true;
+        const peerId = membership.conversation.members.find(
+          (member: (typeof membership.conversation.members)[number]) =>
+            member.userId !== userId,
+        )?.userId;
+        return !!peerId && friendIds.has(peerId) && !blockedIds.has(peerId);
+      },
+    );
+
     const rows = await Promise.all(
-      memberships.map(async (m: (typeof memberships)[number]) => {
+      visibleMemberships.map(async (m: (typeof memberships)[number]) => {
         const conv = m.conversation;
         const last = conv.messages[0];
 
@@ -51,15 +85,21 @@ export class ConversationsService {
 
         const peer =
           conv.type === 'direct'
-            ? conv.members.find((mm: (typeof conv.members)[number]) => mm.userId !== userId)?.user
+            ? conv.members.find(
+                (mm: (typeof conv.members)[number]) => mm.userId !== userId,
+              )?.user
             : null;
 
         return {
           id: conv.id,
           type: conv.type,
-          title: conv.type === 'group' ? conv.title : (peer?.displayName ?? 'Unknown'),
-          avatar_url: conv.type === 'group' ? conv.avatarUrl : (peer?.avatarUrl ?? null),
-          peer_user_id: peer?.id ?? null,
+          title:
+            conv.type === 'group'
+              ? conv.title
+              : (peer?.displayName ?? 'Unknown'),
+          avatar_url:
+            conv.type === 'group' ? conv.avatarUrl : (peer?.avatarUrl ?? null),
+          peer_public_id: peer?.publicId ?? null,
           member_count: conv.members.length,
           unread_count: unread,
           last_message: last
@@ -67,7 +107,7 @@ export class ConversationsService {
                 id: last.id,
                 type: last.type,
                 body: last.body,
-                sender_id: last.senderId,
+                sender_public_id: last.sender?.publicId ?? null,
                 created_at: last.createdAt,
               }
             : null,
@@ -77,17 +117,24 @@ export class ConversationsService {
     );
 
     return rows.sort(
-      (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+      (a, b) =>
+        new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
     );
   }
 
   /** Find-or-create the 1:1 conversation with a peer. */
-  async findOrCreateDirect(userId: string, peerUserId: string) {
-    if (userId === peerUserId) {
-      throw new BadRequestException('Cannot start a conversation with yourself');
-    }
-    const peer = await this.prisma.user.findUnique({ where: { id: peerUserId } });
-    if (!peer) throw new NotFoundException('User not found');
+  async findOrCreateDirect(userId: string, peerPublicId: string) {
+    const peer = await this.prisma.user.findFirst({
+      where: { publicId: peerPublicId, isActive: true },
+      select: { id: true, publicId: true, displayName: true, avatarUrl: true },
+    });
+    if (!peer) throw new NotFoundException('User ID not found.');
+    if (userId === peer.id)
+      throw new BadRequestException(
+        'Cannot start a conversation with yourself',
+      );
+    await this.assertFriends(userId, peer.id);
+    const peerUserId = peer.id;
 
     const existing = await this.prisma.conversation.findFirst({
       where: {
@@ -100,7 +147,12 @@ export class ConversationsService {
       include: { members: true },
     });
     if (existing && existing.members.length === 2) {
-      return { id: existing.id, type: 'direct', title: peer.displayName, peer_user_id: peer.id };
+      return {
+        id: existing.id,
+        type: 'direct',
+        title: peer.displayName,
+        peer_public_id: peer.publicId,
+      };
     }
 
     const created = await this.prisma.conversation.create({
@@ -116,13 +168,29 @@ export class ConversationsService {
       type: 'direct',
     });
 
-    return { id: created.id, type: 'direct', title: peer.displayName, peer_user_id: peer.id };
+    return {
+      id: created.id,
+      type: 'direct',
+      title: peer.displayName,
+      peer_public_id: peer.publicId,
+    };
   }
 
   async createGroup(userId: string, dto: CreateGroupDto) {
-    const memberIds = Array.from(new Set([...dto.member_ids, userId]));
-    const found = await this.prisma.user.count({ where: { id: { in: memberIds } } });
-    if (found !== memberIds.length) throw new NotFoundException('One or more users not found');
+    const publicIds = Array.from(new Set(dto.member_public_ids));
+    const people = await this.prisma.user.findMany({
+      where: { publicId: { in: publicIds }, isActive: true },
+      select: { id: true },
+    });
+    if (people.length !== publicIds.length)
+      throw new NotFoundException('One or more user IDs were not found.');
+    const memberIds = Array.from(
+      new Set([...people.map((p: (typeof people)[number]) => p.id), userId]),
+    );
+    await this.assertFriendsWithMany(
+      userId,
+      memberIds.filter((id) => id !== userId),
+    );
 
     const conv = await this.prisma.conversation.create({
       data: {
@@ -149,7 +217,7 @@ export class ConversationsService {
   }
 
   async detail(userId: string, conversationId: string) {
-    await this.assertMember(userId, conversationId);
+    await this.assertCanCommunicate(userId, conversationId);
     const conv = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
       include: { members: { include: { user: true } } },
@@ -158,17 +226,21 @@ export class ConversationsService {
 
     const peer =
       conv.type === 'direct'
-        ? conv.members.find((m: (typeof conv.members)[number]) => m.userId !== userId)?.user
+        ? conv.members.find(
+            (m: (typeof conv.members)[number]) => m.userId !== userId,
+          )?.user
         : null;
 
     return {
       id: conv.id,
       type: conv.type,
-      title: conv.type === 'group' ? conv.title : (peer?.displayName ?? 'Unknown'),
-      avatar_url: conv.type === 'group' ? conv.avatarUrl : (peer?.avatarUrl ?? null),
+      title:
+        conv.type === 'group' ? conv.title : (peer?.displayName ?? 'Unknown'),
+      avatar_url:
+        conv.type === 'group' ? conv.avatarUrl : (peer?.avatarUrl ?? null),
       created_at: conv.createdAt,
       members: conv.members.map((m: (typeof conv.members)[number]) => ({
-        user_id: m.userId,
+        public_id: m.user.publicId,
         username: m.user.username,
         display_name: m.user.displayName,
         avatar_url: m.user.avatarUrl,
@@ -177,7 +249,11 @@ export class ConversationsService {
     };
   }
 
-  async updateGroup(userId: string, conversationId: string, dto: UpdateGroupDto) {
+  async updateGroup(
+    userId: string,
+    conversationId: string,
+    dto: UpdateGroupDto,
+  ) {
     await this.assertAdmin(userId, conversationId);
     const conv = await this.prisma.conversation.update({
       where: { id: conversationId },
@@ -189,8 +265,24 @@ export class ConversationsService {
     return { id: conv.id, title: conv.title, avatar_url: conv.avatarUrl };
   }
 
-  async addMembers(userId: string, conversationId: string, memberIds: string[]) {
+  async addMembers(
+    userId: string,
+    conversationId: string,
+    memberPublicIds: string[],
+  ) {
     await this.assertAdmin(userId, conversationId);
+    const people = await this.prisma.user.findMany({
+      where: { publicId: { in: memberPublicIds }, isActive: true },
+      select: { id: true },
+    });
+    if (people.length !== new Set(memberPublicIds).size) {
+      throw new NotFoundException('One or more user IDs were not found.');
+    }
+    const memberIds = people.map((p: (typeof people)[number]) => p.id);
+    await this.assertFriendsWithMany(
+      userId,
+      memberIds.filter((id) => id !== userId),
+    );
     await this.prisma.conversationMember.createMany({
       data: memberIds.map((id) => ({ conversationId, userId: id })),
       skipDuplicates: true,
@@ -202,27 +294,45 @@ export class ConversationsService {
     return this.detail(userId, conversationId);
   }
 
-  async removeMember(userId: string, conversationId: string, targetUserId: string) {
-    // Admins can remove anyone; anyone can remove themselves (leave).
-    if (userId !== targetUserId) await this.assertAdmin(userId, conversationId);
-    await this.prisma.conversationMember.deleteMany({
-      where: { conversationId, userId: targetUserId },
+  async removeMember(
+    userId: string,
+    conversationId: string,
+    targetPublicId: string,
+  ) {
+    const target = await this.prisma.user.findUnique({
+      where: { publicId: targetPublicId },
+      select: { id: true },
     });
+    if (!target) throw new NotFoundException('Group member not found');
+    // Admins can remove anyone; anyone can remove themselves (leave).
+    if (userId !== target.id) await this.assertAdmin(userId, conversationId);
+    const result = await this.prisma.conversationMember.deleteMany({
+      where: { conversationId, userId: target.id },
+    });
+    if (!result.count) throw new NotFoundException('Group member not found');
   }
 
   /** Marks everything up to now as read for this member. */
   async markRead(userId: string, conversationId: string): Promise<void> {
-    await this.assertMember(userId, conversationId);
+    await this.assertCanCommunicate(userId, conversationId);
     await this.prisma.conversationMember.update({
       where: { conversationId_userId: { conversationId, userId } },
       data: { lastReadAt: new Date() },
     });
 
     const memberIds = await this.memberIds(conversationId);
+    const reader = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { publicId: true },
+    });
     await this.realtime.emitToUsers(
       memberIds.filter((id) => id !== userId),
       RT.MESSAGE_READ,
-      { conversation_id: conversationId, user_id: userId, read_at: new Date().toISOString() },
+      {
+        conversation_id: conversationId,
+        user_public_id: reader?.publicId ?? null,
+        read_at: new Date().toISOString(),
+      },
     );
   }
 
@@ -231,15 +341,75 @@ export class ConversationsService {
     const member = await this.prisma.conversationMember.findUnique({
       where: { conversationId_userId: { conversationId, userId } },
     });
-    if (!member) throw new ForbiddenException('You are not a member of this conversation');
+    if (!member)
+      throw new ForbiddenException('You are not a member of this conversation');
   }
 
-  private async assertAdmin(userId: string, conversationId: string): Promise<void> {
+  /** Permission to start or continue communication, stricter than history access. */
+  async assertCanCommunicate(
+    userId: string,
+    conversationId: string,
+  ): Promise<void> {
+    await this.assertMember(userId, conversationId);
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { type: true, members: { select: { userId: true } } },
+    });
+    if (!conversation) throw new NotFoundException('Conversation not found');
+    if (conversation.type === 'direct') {
+      const peer = conversation.members.find(
+        (member: (typeof conversation.members)[number]) =>
+          member.userId !== userId,
+      );
+      if (!peer)
+        throw new ForbiddenException(
+          'That direct conversation is unavailable.',
+        );
+      await this.assertFriends(userId, peer.userId);
+    }
+  }
+
+  private async assertFriendsWithMany(
+    userId: string,
+    peerIds: string[],
+  ): Promise<void> {
+    for (const peerId of peerIds) await this.assertFriends(userId, peerId);
+  }
+
+  private async assertFriends(userId: string, peerId: string): Promise<void> {
+    const low = userId < peerId ? userId : peerId;
+    const high = userId < peerId ? peerId : userId;
+    const [friendship, block] = await Promise.all([
+      this.prisma.friendship.findUnique({
+        where: { userLowId_userHighId: { userLowId: low, userHighId: high } },
+      }),
+      this.prisma.userBlock.findFirst({
+        where: {
+          OR: [
+            { blockerId: userId, blockedId: peerId },
+            { blockerId: peerId, blockedId: userId },
+          ],
+        },
+        select: { blockerId: true },
+      }),
+    ]);
+    if (!friendship || block)
+      throw new ForbiddenException(
+        'Only unblocked friends can message or call.',
+      );
+  }
+
+  private async assertAdmin(
+    userId: string,
+    conversationId: string,
+  ): Promise<void> {
     const member = await this.prisma.conversationMember.findUnique({
       where: { conversationId_userId: { conversationId, userId } },
     });
-    if (!member) throw new ForbiddenException('You are not a member of this conversation');
-    if (member.role !== 'admin') throw new ForbiddenException('Group admin only');
+    if (!member)
+      throw new ForbiddenException('You are not a member of this conversation');
+    if (member.role !== 'admin')
+      throw new ForbiddenException('Group admin only');
   }
 
   async memberIds(conversationId: string): Promise<string[]> {

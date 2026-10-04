@@ -5,14 +5,16 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import * as argon2 from 'argon2';
+import { customAlphabet } from 'nanoid';
 import { PrismaService } from '../prisma/prisma.service';
 import { TokensService, TokenPair } from './tokens.service';
 import { RegisterDto, LoginDto } from './dto/auth.dto';
 
 const ARGON_OPTS: argon2.Options = { type: argon2.argon2id };
+const makePublicSuffix = customAlphabet('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', 10);
 
 export interface PublicUser {
-  id: string;
+  public_id: string;
   username: string;
   display_name: string;
   avatar_url: string | null;
@@ -28,23 +30,48 @@ export class AuthService {
   ) {}
 
   /** Open sign-up: username + password + display name. No email, no OTP. */
-  async register(dto: RegisterDto): Promise<{ user: PublicUser; tokens: TokenPair }> {
-    const taken = await this.prisma.user.findUnique({ where: { username: dto.username } });
+  async register(
+    dto: RegisterDto,
+  ): Promise<{ user: PublicUser; tokens: TokenPair }> {
+    const taken = await this.prisma.user.findUnique({
+      where: { username: dto.username },
+    });
     if (taken) throw new ConflictException('Username already taken');
 
-    const user = await this.prisma.user.create({
-      data: {
-        username: dto.username,
-        passwordHash: await argon2.hash(dto.password, ARGON_OPTS),
-        displayName: dto.display_name.trim(),
-      },
-    });
+    const passwordHash = await argon2.hash(dto.password, ARGON_OPTS);
+    let user: Awaited<ReturnType<PrismaService['user']['create']>> | undefined;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        user = await this.prisma.user.create({
+          data: {
+            publicId: `KASSI-${makePublicSuffix()}`,
+            username: dto.username,
+            passwordHash,
+            displayName: dto.display_name.trim(),
+          },
+        });
+        break;
+      } catch (error) {
+        if ((error as { code?: string }).code !== 'P2002') throw error;
+        const usernameTaken = await this.prisma.user.findUnique({
+          where: { username: dto.username },
+        });
+        if (usernameTaken)
+          throw new ConflictException('Username already taken');
+      }
+    }
+    if (!user)
+      throw new ConflictException(
+        'Could not allocate a unique ID. Please try again.',
+      );
 
     return { user: this.toPublic(user), tokens: await this.tokens.issue(user) };
   }
 
   async login(dto: LoginDto): Promise<{ user: PublicUser; tokens: TokenPair }> {
-    const user = await this.prisma.user.findUnique({ where: { username: dto.username } });
+    const user = await this.prisma.user.findUnique({
+      where: { username: dto.username },
+    });
     if (!user) throw new UnauthorizedException('Invalid credentials');
     if (!user.isActive) throw new ForbiddenException('Account is disabled');
     if (!(await argon2.verify(user.passwordHash, dto.password))) {
@@ -70,7 +97,7 @@ export class AuthService {
   }
 
   private toPublic(u: {
-    id: string;
+    publicId: string;
     username: string;
     displayName: string;
     avatarUrl: string | null;
@@ -78,7 +105,7 @@ export class AuthService {
     createdAt: Date;
   }): PublicUser {
     return {
-      id: u.id,
+      public_id: u.publicId,
       username: u.username,
       display_name: u.displayName,
       avatar_url: u.avatarUrl,

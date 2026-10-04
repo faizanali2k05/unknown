@@ -17,6 +17,7 @@ import { UsersService } from '../users/users.service';
 import { MessagesService } from '../messages/messages.service';
 import { ConversationsService } from '../conversations/conversations.service';
 import { REALTIME_CHANNEL, RealtimeEnvelope, RT } from './realtime.constants';
+import { PrismaService } from '../prisma/prisma.service';
 
 interface AuthedSocket extends Socket {
   userId?: string;
@@ -41,6 +42,7 @@ export class RealtimeGateway
   constructor(
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     @Inject(forwardRef(() => UsersService))
     private readonly users: UsersService,
@@ -56,7 +58,8 @@ export class RealtimeGateway
       for (const userId of env.targets) {
         const sockets = this.local.get(userId);
         if (!sockets) continue;
-        for (const sid of sockets) this.server.to(sid).emit(env.event, env.data);
+        for (const sid of sockets)
+          this.server.to(sid).emit(env.event, env.data);
       }
     });
     this.logger.log('WebSocket gateway initialised on /ws');
@@ -70,16 +73,21 @@ export class RealtimeGateway
       const payload = await this.jwt.verifyAsync(token, {
         secret: this.config.get<string>('jwt.accessSecret'),
       });
-      client.userId = payload.sub;
-      client.displayName = payload.name;
+      const principal = await this.prisma.user.findFirst({
+        where: { OR: [{ publicId: payload.sub }, { id: payload.sub }] },
+        select: { id: true, username: true, displayName: true },
+      });
+      if (!principal) throw new Error('Unknown user');
+      client.userId = principal.id;
+      client.displayName = principal.displayName;
 
-      const set = this.local.get(payload.sub) ?? new Set<string>();
+      const set = this.local.get(principal.id) ?? new Set<string>();
       set.add(client.id);
-      this.local.set(payload.sub, set);
-      await this.redis.setOnline(payload.sub, client.id);
+      this.local.set(principal.id, set);
+      await this.redis.setOnline(principal.id, client.id);
 
-      await this.broadcastPresence(payload.sub, true);
-      this.logger.debug(`connected: ${payload.username}`);
+      await this.broadcastPresence(principal.id, true);
+      this.logger.debug(`connected: ${principal.username}`);
     } catch {
       client.emit('error', { message: 'unauthorized' });
       client.disconnect(true);
@@ -125,7 +133,11 @@ export class RealtimeGateway
       });
       return { ok: true, client_id: body.client_id };
     } catch (e) {
-      return { ok: false, client_id: body.client_id, error: (e as Error).message };
+      return {
+        ok: false,
+        client_id: body.client_id,
+        error: (e as Error).message,
+      };
     }
   }
 
@@ -135,11 +147,20 @@ export class RealtimeGateway
     @MessageBody() body: { conversation_id: string },
   ): Promise<void> {
     if (!client.userId) return;
+    try {
+      await this.conversations.assertCanCommunicate(
+        client.userId,
+        body.conversation_id,
+      );
+    } catch {
+      return;
+    }
     const memberIds = await this.conversations.memberIds(body.conversation_id);
+    const publicId = await this.users.publicIdFor(client.userId);
     await this.redis.publish(REALTIME_CHANNEL, {
       targets: memberIds.filter((id) => id !== client.userId),
       event: RT.MESSAGE_TYPING,
-      data: { conversation_id: body.conversation_id, user_id: client.userId },
+      data: { conversation_id: body.conversation_id, user_public_id: publicId },
     } satisfies RealtimeEnvelope);
   }
 
@@ -149,19 +170,30 @@ export class RealtimeGateway
     @MessageBody() body: { conversation_id: string },
   ): Promise<void> {
     if (!client.userId) return;
-    await this.conversations.markRead(client.userId, body.conversation_id).catch(() => undefined);
+    await this.conversations
+      .markRead(client.userId, body.conversation_id)
+      .catch(() => undefined);
   }
 
   /** Presence fan-out: everyone this user shares a conversation with. */
-  private async broadcastPresence(userId: string, online: boolean): Promise<void> {
+  private async broadcastPresence(
+    userId: string,
+    online: boolean,
+  ): Promise<void> {
     const memberships = await this.conversations
       .peersOf(userId)
       .catch(() => [] as string[]);
     if (memberships.length === 0) return;
+    const publicId = await this.users.publicIdFor(userId);
+    if (!publicId) return;
     await this.redis.publish(REALTIME_CHANNEL, {
       targets: memberships,
       event: RT.PRESENCE_UPDATE,
-      data: { user_id: userId, online, last_seen_at: new Date().toISOString() },
+      data: {
+        user_public_id: publicId,
+        online,
+        last_seen_at: new Date().toISOString(),
+      },
     } satisfies RealtimeEnvelope);
   }
 }

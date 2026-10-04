@@ -8,6 +8,6 @@ import { ConversationsModule } from '../conversations/conversations.module';
   imports: [ConversationsModule],
   controllers: [CallsController],
   providers: [CallsService, LivekitService],
-  exports: [CallsService],
+  exports: [CallsService, LivekitService],
 })
 export class CallsModule {}

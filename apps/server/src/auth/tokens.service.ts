@@ -14,6 +14,7 @@ export interface TokenPair {
 
 interface TokenUser {
   id: string;
+  publicId: string;
   username: string;
   displayName: string;
 }
@@ -33,7 +34,8 @@ export class TokensService {
 
   async issue(user: TokenUser): Promise<TokenPair> {
     const access_token = await this.jwt.signAsync(
-      { sub: user.id, username: user.username, name: user.displayName },
+      // Keep database primary keys out of client-held access tokens.
+      { sub: user.publicId, username: user.username, name: user.displayName },
       {
         secret: this.config.get<string>('jwt.accessSecret'),
         expiresIn: this.config.get<string>('jwt.accessTtl'),
@@ -41,7 +43,9 @@ export class TokensService {
     );
 
     const refresh_token = randomBytes(48).toString('hex');
-    const ttlDays = this.parseDays(this.config.get<string>('jwt.refreshTtl') ?? '30d');
+    const ttlDays = this.parseDays(
+      this.config.get<string>('jwt.refreshTtl') ?? '30d',
+    );
     await this.prisma.refreshToken.create({
       data: {
         userId: user.id,

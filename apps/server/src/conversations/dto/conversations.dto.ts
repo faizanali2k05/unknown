@@ -1,15 +1,17 @@
 import {
   ArrayMinSize,
   IsArray,
+  Matches,
   IsOptional,
   IsString,
-  IsUUID,
   MaxLength,
 } from 'class-validator';
 
 export class CreateDirectDto {
-  @IsUUID()
-  peer_user_id!: string;
+  @IsString()
+  @MaxLength(16)
+  @Matches(/^KASSI-[A-Z0-9]{10}$/)
+  peer_public_id!: string;
 }
 
 export class CreateGroupDto {
@@ -19,8 +21,9 @@ export class CreateGroupDto {
 
   @IsArray()
   @ArrayMinSize(1)
-  @IsUUID('4', { each: true })
-  member_ids!: string[];
+  @IsString({ each: true })
+  @Matches(/^KASSI-[A-Z0-9]{10}$/, { each: true })
+  member_public_ids!: string[];
 
   @IsOptional()
   @IsString()
@@ -43,6 +46,7 @@ export class UpdateGroupDto {
 export class MembersDto {
   @IsArray()
   @ArrayMinSize(1)
-  @IsUUID('4', { each: true })
-  member_ids!: string[];
+  @IsString({ each: true })
+  @Matches(/^KASSI-[A-Z0-9]{10}$/, { each: true })
+  member_public_ids!: string[];
 }

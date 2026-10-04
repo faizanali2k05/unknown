@@ -17,6 +17,8 @@ import { MessagesModule } from './messages/messages.module';
 import { CallsModule } from './calls/calls.module';
 import { DevicesModule } from './devices/devices.module';
 import { MediaModule } from './media/media.module';
+import { FriendsModule } from './friends/friends.module';
+import { MeetingsModule } from './meetings/meetings.module';
 
 @Module({
   imports: [
@@ -43,6 +45,8 @@ import { MediaModule } from './media/media.module';
     CallsModule,
     DevicesModule,
     MediaModule,
+    FriendsModule,
+    MeetingsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

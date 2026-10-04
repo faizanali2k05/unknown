@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { FlatList, Pressable, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
-import { KeyboardAvoidingView, useKeyboardState } from 'react-native-keyboard-controller';
+import {
+  KeyboardAvoidingView,
+  useKeyboardState,
+} from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useHeaderHeight } from '@react-navigation/elements';
 import { useTheme, spacing, radius, typography } from '../../src/theme';
@@ -61,7 +64,12 @@ export default function Chat() {
     const call = await api.startCall(id, kind);
     router.push({
       pathname: '/call/[id]',
-      params: { id: call.call_id, name: title ?? 'Call', kind, token: call.token },
+      params: {
+        id: call.call_id,
+        name: title ?? 'Call',
+        kind,
+        token: call.token,
+      },
     });
   };
 
@@ -87,20 +95,27 @@ export default function Chat() {
         }
         return prev.some((x) => x.id === m.id) ? prev : [...prev, m];
       });
-      if (m.sender_id !== user?.id) void api.markRead(id).catch(() => undefined);
+      if (m.sender_public_id !== user?.public_id)
+        void api.markRead(id).catch(() => undefined);
     });
 
-    const offTyping = on<{ conversation_id: string; user_id: string }>('message:typing', (d) => {
-      if (d.conversation_id !== id || d.user_id === user?.id) return;
-      setPeerTyping(true);
-      if (typingClear.current) clearTimeout(typingClear.current);
-      typingClear.current = setTimeout(() => setPeerTyping(false), 3000);
-    });
+    const offTyping = on<{ conversation_id: string; user_public_id: string }>(
+      'message:typing',
+      (d) => {
+        if (d.conversation_id !== id || d.user_public_id === user?.public_id)
+          return;
+        setPeerTyping(true);
+        if (typingClear.current) clearTimeout(typingClear.current);
+        typingClear.current = setTimeout(() => setPeerTyping(false), 3000);
+      },
+    );
 
     const offDeleted = on<{ message_id: string }>('message:deleted', (d) => {
       setMessages((prev) =>
         prev.map((m) =>
-          m.id === d.message_id ? { ...m, body: null, deleted_at: new Date().toISOString() } : m,
+          m.id === d.message_id
+            ? { ...m, body: null, deleted_at: new Date().toISOString() }
+            : m,
         ),
       );
     });
@@ -110,7 +125,7 @@ export default function Chat() {
       offTyping();
       offDeleted();
     };
-  }, [id, load, user?.id]);
+  }, [id, load, user?.public_id]);
 
   const onChangeText = (v: string) => {
     setText(v);
@@ -133,7 +148,7 @@ export default function Chat() {
       id: clientId,
       client_id: clientId,
       conversation_id: id,
-      sender_id: user.id,
+      sender_public_id: user.public_id,
       type: 'text',
       body,
       media_url: null,
@@ -147,11 +162,15 @@ export default function Chat() {
     try {
       const saved = await api.sendMessage(id, { client_id: clientId, body });
       setMessages((prev) =>
-        prev.map((m) => (m.client_id === clientId ? { ...saved, status: 'sent' } : m)),
+        prev.map((m) =>
+          m.client_id === clientId ? { ...saved, status: 'sent' } : m,
+        ),
       );
     } catch {
       setMessages((prev) =>
-        prev.map((m) => (m.client_id === clientId ? { ...m, status: 'failed' } : m)),
+        prev.map((m) =>
+          m.client_id === clientId ? { ...m, status: 'failed' } : m,
+        ),
       );
     }
   };
@@ -167,17 +186,29 @@ export default function Chat() {
         data={messages}
         keyExtractor={(m) => m.client_id || m.id}
         contentContainerStyle={{ padding: spacing.md, gap: 6 }}
-        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+        onContentSizeChange={() =>
+          listRef.current?.scrollToEnd({ animated: true })
+        }
         renderItem={({ item }) => {
-          const mine = item.sender_id === user?.id;
+          const mine = item.sender_public_id === user?.public_id;
           const deleted = !!item.deleted_at;
           return (
-            <View style={{ flexDirection: 'row', justifyContent: mine ? 'flex-end' : 'flex-start' }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                justifyContent: mine ? 'flex-end' : 'flex-start',
+              }}
+            >
               <Pressable
                 onLongPress={() => {
                   // Delete for everyone. Only your own, already-saved messages:
                   // an optimistic row has no server id to delete yet.
-                  if (!mine || deleted || item.status === 'sending' || item.status === 'failed') {
+                  if (
+                    !mine ||
+                    deleted ||
+                    item.status === 'sending' ||
+                    item.status === 'failed'
+                  ) {
                     return;
                   }
                   void api.deleteMessage(item.id).catch(() => undefined);
@@ -235,7 +266,11 @@ export default function Chat() {
                             : 'checkmark-done'
                       }
                       size={13}
-                      color={item.status === 'failed' ? t.status.danger : t.bubble.mineText}
+                      color={
+                        item.status === 'failed'
+                          ? t.status.danger
+                          : t.bubble.mineText
+                      }
                     />
                   ) : null}
                 </View>
@@ -248,7 +283,11 @@ export default function Chat() {
             <Text
               style={[
                 typography.caption,
-                { color: t.text.muted, fontStyle: 'italic', marginLeft: spacing.sm },
+                {
+                  color: t.text.muted,
+                  fontStyle: 'italic',
+                  marginLeft: spacing.sm,
+                },
               ]}
             >
               typing…
@@ -270,7 +309,12 @@ export default function Chat() {
           // KeyboardAvoidingView already supplies the offset, so adding the
           // inset again would leave a visible gap above the keyboard.
           paddingBottom:
-            spacing.md + (keyboard.isVisible ? 0 : insets.bottom > 0 ? insets.bottom : spacing.xs),
+            spacing.md +
+            (keyboard.isVisible
+              ? 0
+              : insets.bottom > 0
+                ? insets.bottom
+                : spacing.xs),
           borderTopWidth: 1,
           borderTopColor: t.border.default,
           backgroundColor: t.bg.secondary,

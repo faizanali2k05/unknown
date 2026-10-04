@@ -33,6 +33,8 @@ DUMP="/tmp/unknown-${STAMP}.sql.gz"
 docker exec unknown-postgres pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
   | gzip -9 > "$DUMP"
 
+gzip -t "$DUMP"
+
 SIZE=$(stat -c%s "$DUMP")
 if [ "$SIZE" -lt 1000 ]; then
   echo "ERROR: dump is only ${SIZE} bytes — refusing to upload a broken backup"
@@ -50,6 +52,7 @@ docker run --rm --network unknown-net \
     mc alias set store http://unknown-minio:9000 '$S3_ACCESS_KEY_ID' '$S3_SECRET_ACCESS_KEY' >/dev/null &&
     mc mb --ignore-existing store/$BUCKET >/dev/null &&
     mc cp /backup/$(basename "$DUMP") store/$BUCKET/ >/dev/null &&
+    mc stat store/$BUCKET/$(basename "$DUMP") >/dev/null &&
     echo uploaded &&
     mc ls store/$BUCKET | tail -3
   "

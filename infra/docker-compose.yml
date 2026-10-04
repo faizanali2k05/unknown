@@ -18,7 +18,8 @@
 #      docker compose up -d
 #      docker compose logs -f unknown-api
 #
-#  LiveKit + coturn are Phase 7 and deliberately not in this file yet.
+#  LiveKit uses host networking for WebRTC media; do not add standalone
+#  Coturn without checking host ports and certificate requirements.
 # =============================================================================
 
 name: unknown
@@ -97,6 +98,8 @@ services:
     container_name: unknown-api
     restart: unless-stopped
     env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       unknown-postgres: { condition: service_healthy }
       unknown-redis: { condition: service_healthy }
@@ -120,12 +123,10 @@ services:
   #
   #  Host networking, because WebRTC needs to advertise the real public IP and
   #  hand out a UDP media range; going through a bridge would break ICE.
-  #  Signalling (7880) is only reachable from the docker bridge — Caddy proxies
-  #  it as wss://rtc.<domain>. The media ports must be public, and the UFW rules
-  #  for them already exist.
+  #  Signaling (7880) stays internal and is proxied by the app's Nginx vhost.
+  #  The media and TURN ports are documented in livekit.yaml.
   #
-  #  No coturn: at this scale LiveKit itself is the relay, so a separate TURN
-  #  server would add a moving part without adding reachability.
+  #  LiveKit's embedded TURN server avoids a separate Coturn container.
   # ---------------------------------------------------------------------------
   unknown-livekit:
     image: livekit/livekit-server:latest
@@ -134,7 +135,11 @@ services:
     command: ["--config", "/etc/livekit.yaml"]
     network_mode: host
     volumes:
-      - ./livekit.yaml:/etc/livekit.yaml:ro
+      - ./livekit.runtime.yaml:/etc/livekit.yaml:ro
+      # Certbot's `live/` paths are symlinks into `archive/`; mount only this
+      # app domain's certificate directories, not the host's full cert store.
+      - /etc/letsencrypt/live/unknown.5kassi.com:/etc/letsencrypt/live/unknown.5kassi.com:ro
+      - /etc/letsencrypt/archive/unknown.5kassi.com:/etc/letsencrypt/archive/unknown.5kassi.com:ro
 
 networks:
   unknown-net:

@@ -4,7 +4,7 @@ import { RedisService } from '../redis/redis.service';
 import { UpdateProfileDto } from './dto/users.dto';
 
 export interface UserDto {
-  id: string;
+  public_id: string;
   username: string;
   display_name: string;
   avatar_url: string | null;
@@ -30,43 +30,38 @@ export class UsersService {
     const user = await this.prisma.user.update({
       where: { id: userId },
       data: {
-        ...(dto.display_name !== undefined ? { displayName: dto.display_name.trim() } : {}),
-        ...(dto.status_text !== undefined ? { statusText: dto.status_text } : {}),
+        ...(dto.display_name !== undefined
+          ? { displayName: dto.display_name.trim() }
+          : {}),
+        ...(dto.status_text !== undefined
+          ? { statusText: dto.status_text }
+          : {}),
         ...(dto.avatar_url !== undefined ? { avatarUrl: dto.avatar_url } : {}),
       },
     });
     return this.toDto(user);
   }
 
-  /**
-   * Team directory. Everyone can see everyone in an org this size, so an empty
-   * query returns the whole active list rather than nothing.
-   */
-  async directory(currentUserId: string, q?: string): Promise<UserDto[]> {
-    const query = q?.trim();
-    const users = await this.prisma.user.findMany({
-      where: {
-        isActive: true,
-        id: { not: currentUserId },
-        ...(query
-          ? {
-              OR: [
-                { username: { contains: query, mode: 'insensitive' as const } },
-                { displayName: { contains: query, mode: 'insensitive' as const } },
-              ],
-            }
-          : {}),
-      },
-      orderBy: { displayName: 'asc' },
-      take: 200,
+  /** Exact-ID lookup only; never searches or enumerates other accounts. */
+  async lookup(publicId: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { publicId, isActive: true },
+      select: { publicId: true, displayName: true, avatarUrl: true },
     });
-    return Promise.all(users.map((u: (typeof users)[number]) => this.toDto(u)));
+    if (!user) throw new NotFoundException('User ID not found.');
+    return {
+      public_id: user.publicId,
+      display_name: user.displayName,
+      avatar_url: user.avatarUrl,
+    };
   }
 
-  async byId(id: string): Promise<UserDto> {
-    const user = await this.prisma.user.findUnique({ where: { id } });
-    if (!user) throw new NotFoundException('User not found');
-    return this.toDto(user);
+  async publicIdFor(userId: string): Promise<string | null> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { publicId: true },
+    });
+    return user?.publicId ?? null;
   }
 
   /** Called by the socket gateway when a user's last socket drops. */
@@ -78,6 +73,7 @@ export class UsersService {
 
   private async toDto(u: {
     id: string;
+    publicId: string;
     username: string;
     displayName: string;
     avatarUrl: string | null;
@@ -85,7 +81,7 @@ export class UsersService {
     lastSeenAt: Date | null;
   }): Promise<UserDto> {
     return {
-      id: u.id,
+      public_id: u.publicId,
       username: u.username,
       display_name: u.displayName,
       avatar_url: u.avatarUrl,

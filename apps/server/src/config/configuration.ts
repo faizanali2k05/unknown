@@ -4,6 +4,7 @@
  */
 export interface AppConfig {
   nodeEnv: string;
+  appUrl: string;
   port: number;
   logLevel: string;
   corsOrigins: string[];
@@ -24,7 +25,7 @@ export interface AppConfig {
     secretKey: string;
     forcePathStyle: boolean;
   };
-  livekit: { apiKey: string; apiSecret: string; url: string };
+  livekit: { apiKey: string; apiSecret: string; url: string; httpUrl: string };
 }
 
 const required = (key: string, fallback?: string): string => {
@@ -37,9 +38,12 @@ const required = (key: string, fallback?: string): string => {
 
 export default (): AppConfig => ({
   nodeEnv: process.env.NODE_ENV ?? 'development',
+  appUrl: process.env.APP_URL ?? '',
   port: parseInt(process.env.API_PORT ?? '3000', 10),
   logLevel: process.env.LOG_LEVEL ?? 'info',
-  corsOrigins: (process.env.CORS_ORIGINS ?? '*').split(',').map((s) => s.trim()),
+  corsOrigins: (process.env.CORS_ORIGINS ?? '*')
+    .split(',')
+    .map((s) => s.trim()),
   jwt: {
     accessSecret: required('JWT_ACCESS_SECRET', 'dev_access_secret'),
     refreshSecret: required('JWT_REFRESH_SECRET', 'dev_refresh_secret'),
@@ -53,7 +57,10 @@ export default (): AppConfig => ({
   redisUrl: process.env.REDIS_URL ?? 'redis://localhost:6379',
   s3: {
     endpoint: process.env.S3_ENDPOINT ?? 'http://localhost:9000',
-    publicEndpoint: process.env.S3_PUBLIC_ENDPOINT ?? process.env.S3_ENDPOINT ?? 'http://localhost:9000',
+    publicEndpoint:
+      process.env.S3_PUBLIC_ENDPOINT ??
+      process.env.S3_ENDPOINT ??
+      'http://localhost:9000',
     region: process.env.S3_REGION ?? 'us-east-1',
     bucket: process.env.S3_BUCKET ?? 'unknown-media',
     accessKey: process.env.S3_ACCESS_KEY_ID ?? 'unknown',
@@ -64,5 +71,9 @@ export default (): AppConfig => ({
     apiKey: process.env.LIVEKIT_API_KEY ?? 'unknown_dev_key',
     apiSecret: process.env.LIVEKIT_API_SECRET ?? 'dev_livekit_secret',
     url: process.env.LIVEKIT_URL ?? 'ws://localhost:7880',
+    httpUrl:
+      process.env.LIVEKIT_HTTP_URL ??
+      process.env.LIVEKIT_URL?.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:') ??
+      'http://localhost:7880',
   },
 });

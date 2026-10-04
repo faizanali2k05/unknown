@@ -31,6 +31,7 @@ apps/mobile/dist/
 
 # ---------- Docker runtime data ----------
 infra/data/
+infra/livekit.runtime.yaml
 
 # ---------- OS / editor ----------
 .DS_Store

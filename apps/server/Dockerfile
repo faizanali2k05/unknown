@@ -31,10 +31,10 @@ RUN addgroup -S unknown && adduser -S unknown -G unknown
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/prisma ./prisma
+COPY --from=build /app/scripts ./scripts
 COPY --from=build /app/package.json ./package.json
 USER unknown
-# tini for clean signal handling; sync schema (idempotent) then boot.
-# `db push` creates/updates tables from schema.prisma — safe on every boot for
-# this single-instance self-hosted deploy and needs no committed migration files.
+# tini for clean signal handling; apply reviewed, versioned schema changes
+# before serving traffic. Production must not use unreviewed `prisma db push`.
 ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["sh", "-c", "npx prisma db push --skip-generate && node dist/main.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main.js"]

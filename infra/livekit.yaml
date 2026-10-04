@@ -2,10 +2,13 @@
 #  LiveKit SFU config. Rendered from infra/.env by scripts/deploy-livekit.sh —
 #  edit that script, not this file, or the next deploy will overwrite you.
 #
-#  Ports here must match the UFW rules that are already in place:
-#    7880/tcp  signalling  (bridge only; Caddy proxies it as wss://rtc.<domain>)
-#    7881/tcp  ICE/TCP fallback (public)
-#    50000-50100/udp  media (public)
+#  Required public firewall ports for media and TURN:
+#    3478/udp  embedded TURN/UDP
+#    5349/tcp  embedded TURN/TLS
+#    40000-40100/udp  embedded TURN relay allocations
+#    7881/tcp  ICE/TCP fallback
+#    50000-50100/udp  media
+#  Signaling on 7880/tcp stays behind the Unknown Nginx vhost.
 # =============================================================================
 
 port: 7880
@@ -27,6 +30,16 @@ room:
   empty_timeout: 120
   departure_timeout: 20
   max_participants: 8
+
+turn:
+  enabled: true
+  relay_range_start: 40000
+  relay_range_end: 40100
+  domain: unknown.5kassi.com
+  tls_port: 5349
+  cert_file: /etc/letsencrypt/live/unknown.5kassi.com/fullchain.pem
+  key_file: /etc/letsencrypt/live/unknown.5kassi.com/privkey.pem
+  udp_port: 3478
 
 logging:
   level: info

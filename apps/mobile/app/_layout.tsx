@@ -17,7 +17,9 @@ import { on } from '../src/api/socket';
 // (`requireNativeComponent is not a function`) and takes the whole UI down.
 if (Platform.OS !== 'web') {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  (require('@livekit/react-native') as typeof import('@livekit/react-native')).registerGlobals();
+  (
+    require('@livekit/react-native') as typeof import('@livekit/react-native')
+  ).registerGlobals();
 }
 
 /** Sends the user to the right stack once auth state is known. */
@@ -37,25 +39,33 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   // Ring on an incoming call from anywhere in the app.
   useEffect(() => {
     if (!user) return;
-    return on<{ call_id: string; initiator_display_name: string; kind: 'audio' | 'video' }>(
-      'call:incoming',
-      (d) => {
-        router.push({
-          pathname: '/call/[id]',
-          params: {
-            id: d.call_id,
-            name: d.initiator_display_name,
-            kind: d.kind,
-            incoming: '1',
-          },
-        });
-      },
-    );
+    return on<{
+      call_id: string;
+      initiator_display_name: string;
+      kind: 'audio' | 'video';
+    }>('call:incoming', (d) => {
+      router.push({
+        pathname: '/call/[id]',
+        params: {
+          id: d.call_id,
+          name: d.initiator_display_name,
+          kind: d.kind,
+          incoming: '1',
+        },
+      });
+    });
   }, [user, router]);
 
   if (!ready) {
     return (
-      <View style={{ flex: 1, backgroundColor: t.bg.primary, alignItems: 'center', justifyContent: 'center' }}>
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: t.bg.primary,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
         <ActivityIndicator color={t.accent.default} size="large" />
       </View>
     );
@@ -86,6 +96,10 @@ function Root() {
             options={{ headerShown: false, presentation: 'fullScreenModal' }}
           />
           <Stack.Screen name="new-group" options={{ title: 'New group' }} />
+          <Stack.Screen
+            name="meeting/[code]"
+            options={{ title: 'Join meeting' }}
+          />
         </Stack>
       </AuthGate>
     </>
@@ -97,12 +111,12 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ErrorBoundary>
         <SafeAreaProvider>
-        <KeyboardProvider>
-          <ThemeProvider>
-            <AuthProvider>
-              <Root />
-            </AuthProvider>
-          </ThemeProvider>
+          <KeyboardProvider>
+            <ThemeProvider>
+              <AuthProvider>
+                <Root />
+              </AuthProvider>
+            </ThemeProvider>
           </KeyboardProvider>
         </SafeAreaProvider>
       </ErrorBoundary>

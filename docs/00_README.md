@@ -1,8 +1,8 @@
 # Project Unknown — Documentation Set
 
-A self-hosted, closed-network VoIP calling & messaging app (iOS + Android) where users get an in-app number, set any **display number** they like, and call / text / leave voicemail with other users on the app.
+A self-hosted private messaging and calling app (web, iOS, Android) with 1-to-1 and group chats, audio/video calls, friend requests, and signed-in meeting links. Contacts are added by exact unique public ID; there is no public user directory.
 
-> **Design principle:** Everything runs *inside the app's own network*. No third-party telecom carriers, no PSTN, no caller-ID injection into the public phone system. The "display number" is a user-controlled profile label (like a username), shown to other app users only. This makes the product fully legal and 100% free to run on your own VPS.
+> **Design principle:** Internal database IDs stay private. Users can discover one another only by entering an exact public ID; messaging and calling use authenticated membership and friendship checks.
 
 ---
 
@@ -25,8 +25,8 @@ A self-hosted, closed-network VoIP calling & messaging app (iOS + Android) where
 
 ```
 Mobile:        React Native (Expo, bare workflow)  — iOS + Android, one codebase
-Voice calls:   LiveKit (self-hosted WebRTC SFU)    — real-time audio
-NAT traversal: coturn (self-hosted TURN/STUN)
+Voice/video:   LiveKit (self-hosted WebRTC SFU)    — real browser/native media
+NAT fallback: LiveKit UDP/TCP fallback configured; standalone Coturn not active
 Messaging:     NestJS WebSocket gateway + Redis pub/sub
 Backend API:   NestJS (TypeScript)
 Database:      PostgreSQL + Prisma

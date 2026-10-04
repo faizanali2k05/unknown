@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { AccessToken } from 'livekit-server-sdk';
+import { AccessToken, RoomServiceClient } from 'livekit-server-sdk';
 
 /**
  * Mints short-lived, room-scoped LiveKit join tokens. Every call is relayed
@@ -17,11 +17,16 @@ export class LivekitService {
    * publishes. Room membership is the security boundary that matters, and the
    * token is scoped to exactly one room with a short TTL.
    */
-  async createJoinToken(room: string, identity: string, name: string): Promise<string> {
+  async createJoinToken(
+    room: string,
+    identity: string,
+    name: string,
+    ttl = '4h',
+  ): Promise<string> {
     const at = new AccessToken(
       this.config.get<string>('livekit.apiKey')!,
       this.config.get<string>('livekit.apiSecret')!,
-      { identity, name, ttl: '4h' },
+      { identity, name, ttl },
     );
     at.addGrant({
       room,
@@ -31,5 +36,14 @@ export class LivekitService {
       canPublishData: true,
     });
     return at.toJwt();
+  }
+
+  async deleteRoom(room: string): Promise<void> {
+    const rooms = new RoomServiceClient(
+      this.config.get<string>('livekit.httpUrl')!,
+      this.config.get<string>('livekit.apiKey')!,
+      this.config.get<string>('livekit.apiSecret')!,
+    );
+    await rooms.deleteRoom(room);
   }
 }

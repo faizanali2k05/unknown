@@ -1,4 +1,9 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConversationsService } from '../conversations/conversations.service';
 import { RealtimePublisher } from '../realtime/realtime.publisher';
@@ -21,11 +26,13 @@ export class MessagesService {
 
   /** Newest-first page. `before` is a message id to page backwards from. */
   async history(userId: string, conversationId: string, before?: string) {
-    await this.conversations.assertMember(userId, conversationId);
+    await this.conversations.assertCanCommunicate(userId, conversationId);
 
     let cursorDate: Date | undefined;
     if (before) {
-      const anchor = await this.prisma.message.findUnique({ where: { id: before } });
+      const anchor = await this.prisma.message.findFirst({
+        where: { id: before, conversationId },
+      });
       cursorDate = anchor?.createdAt;
     }
 
@@ -36,6 +43,7 @@ export class MessagesService {
       },
       orderBy: { createdAt: 'desc' },
       take: PAGE_SIZE,
+      include: { sender: { select: { publicId: true } } },
     });
 
     return {
@@ -50,14 +58,17 @@ export class MessagesService {
    * which is what makes the offline queue safe to retry.
    */
   async send(senderId: string, conversationId: string, dto: SendMessageDto) {
-    await this.conversations.assertMember(senderId, conversationId);
+    await this.conversations.assertCanCommunicate(senderId, conversationId);
 
     if (!dto.body && !dto.media_url) {
       throw new BadRequestException('A message needs body or media_url');
     }
 
     const existing = await this.prisma.message.findUnique({
-      where: { conversationId_clientId: { conversationId, clientId: dto.client_id } },
+      where: {
+        conversationId_clientId: { conversationId, clientId: dto.client_id },
+      },
+      include: { sender: { select: { publicId: true } } },
     });
     if (existing) return this.toDto(existing);
 
@@ -72,6 +83,7 @@ export class MessagesService {
         mediaMeta: (dto.media_meta as never) ?? undefined,
         replyToId: dto.reply_to_id ?? null,
       },
+      include: { sender: { select: { publicId: true } } },
     });
 
     const memberIds = await this.conversations.memberIds(conversationId);
@@ -82,7 +94,9 @@ export class MessagesService {
     await this.realtime.emitToUsers(memberIds, RT.MESSAGE_NEW, payload);
 
     // Offline recipients get a high-priority push instead.
-    const sender = await this.prisma.user.findUnique({ where: { id: senderId } });
+    const sender = await this.prisma.user.findUnique({
+      where: { id: senderId },
+    });
     for (const rid of recipients) {
       if (await this.redis.isOnline(rid).catch(() => false)) continue;
       void this.push.sendToUser(
@@ -101,7 +115,9 @@ export class MessagesService {
 
   /** Delete for everyone — soft delete, the row stays. */
   async remove(userId: string, messageId: string): Promise<void> {
-    const message = await this.prisma.message.findUnique({ where: { id: messageId } });
+    const message = await this.prisma.message.findUnique({
+      where: { id: messageId },
+    });
     if (!message) throw new NotFoundException('Message not found');
     if (message.senderId !== userId) {
       throw new ForbiddenException('You can only delete your own messages');
@@ -110,10 +126,17 @@ export class MessagesService {
 
     await this.prisma.message.update({
       where: { id: messageId },
-      data: { deletedAt: new Date(), body: null, mediaUrl: null, mediaMeta: undefined },
+      data: {
+        deletedAt: new Date(),
+        body: null,
+        mediaUrl: null,
+        mediaMeta: undefined,
+      },
     });
 
-    const memberIds = await this.conversations.memberIds(message.conversationId);
+    const memberIds = await this.conversations.memberIds(
+      message.conversationId,
+    );
     await this.realtime.emitToUsers(memberIds, RT.MESSAGE_DELETED, {
       message_id: messageId,
       conversation_id: message.conversationId,
@@ -138,6 +161,7 @@ export class MessagesService {
     clientId: string;
     conversationId: string;
     senderId: string | null;
+    sender?: { publicId: string } | null;
     type: string;
     body: string | null;
     mediaUrl: string | null;
@@ -150,7 +174,7 @@ export class MessagesService {
     id: m.id,
     client_id: m.clientId,
     conversation_id: m.conversationId,
-    sender_id: m.senderId,
+    sender_public_id: m.sender?.publicId ?? null,
     type: m.type,
     body: m.body,
     media_url: m.mediaUrl,

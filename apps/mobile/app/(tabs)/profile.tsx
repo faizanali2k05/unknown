@@ -1,6 +1,12 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
-import { useTheme, spacing, radius, typography, ThemePreference } from '../../src/theme';
+import {
+  useTheme,
+  spacing,
+  radius,
+  typography,
+  ThemePreference,
+} from '../../src/theme';
 import { Avatar, Button, Field, Icon } from '../../src/components/ui';
 import { useAuth } from '../../src/store/auth';
 import { api } from '../../src/api';
@@ -12,13 +18,31 @@ export default function Profile() {
   const [displayName, setDisplayName] = useState(user?.display_name ?? '');
   const [statusText, setStatusText] = useState(user?.status_text ?? '');
   const [busy, setBusy] = useState(false);
+  const [blocked, setBlocked] = useState<
+    { public_id: string; display_name: string }[]
+  >([]);
+
+  const loadBlocked = async () => {
+    try {
+      setBlocked(await api.blockedUsers());
+    } catch {
+      setBlocked([]);
+    }
+  };
+
+  useEffect(() => {
+    void loadBlocked();
+  }, []);
 
   if (!user) return null;
 
   const save = async () => {
     setBusy(true);
     try {
-      await api.updateMe({ display_name: displayName.trim(), status_text: statusText.trim() });
+      await api.updateMe({
+        display_name: displayName.trim(),
+        status_text: statusText.trim(),
+      });
       await refresh();
       setEditing(false);
     } finally {
@@ -30,12 +54,33 @@ export default function Profile() {
     <ScrollView style={{ flex: 1, backgroundColor: t.bg.primary }}>
       <View style={{ alignItems: 'center', paddingVertical: spacing.xl }}>
         <Avatar name={user.display_name} size={84} />
-        <Text style={[typography.title, { color: t.text.primary, marginTop: spacing.md }]}>
+        <Text
+          style={[
+            typography.title,
+            { color: t.text.primary, marginTop: spacing.md },
+          ]}
+        >
           {user.display_name}
         </Text>
-        <Text style={[typography.body, { color: t.text.secondary }]}>@{user.username}</Text>
+        <Text style={[typography.body, { color: t.text.secondary }]}>
+          @{user.username}
+        </Text>
+        <Text
+          selectable
+          style={[
+            typography.caption,
+            { color: t.text.muted, marginTop: spacing.xs },
+          ]}
+        >
+          Unique ID · {user.public_id}
+        </Text>
         {user.status_text ? (
-          <Text style={[typography.caption, { color: t.text.muted, marginTop: spacing.xs }]}>
+          <Text
+            style={[
+              typography.caption,
+              { color: t.text.muted, marginTop: spacing.xs },
+            ]}
+          >
             {user.status_text}
           </Text>
         ) : null}
@@ -44,7 +89,11 @@ export default function Profile() {
       <Section title="Profile">
         {editing ? (
           <View style={{ padding: spacing.lg }}>
-            <Field label="Display name" value={displayName} onChangeText={setDisplayName} />
+            <Field
+              label="Display name"
+              value={displayName}
+              onChangeText={setDisplayName}
+            />
             <Field
               label="Status"
               placeholder="What are you working on?"
@@ -58,16 +107,27 @@ export default function Profile() {
                 onPress={() => setEditing(false)}
                 style={{ flex: 1 }}
               />
-              <Button label="Save" onPress={save} loading={busy} style={{ flex: 1 }} />
+              <Button
+                label="Save"
+                onPress={save}
+                loading={busy}
+                style={{ flex: 1 }}
+              />
             </View>
           </View>
         ) : (
-          <Row icon="create-outline" label="Edit profile" onPress={() => setEditing(true)} />
+          <Row
+            icon="create-outline"
+            label="Edit profile"
+            onPress={() => setEditing(true)}
+          />
         )}
       </Section>
 
       <Section title="Appearance">
-        <View style={{ flexDirection: 'row', gap: spacing.sm, padding: spacing.lg }}>
+        <View
+          style={{ flexDirection: 'row', gap: spacing.sm, padding: spacing.lg }}
+        >
           {(['system', 'light', 'dark'] as ThemePreference[]).map((p) => {
             const active = preference === p;
             return (
@@ -98,6 +158,46 @@ export default function Profile() {
         </View>
       </Section>
 
+      <Section title="Blocked users">
+        {blocked.length === 0 ? (
+          <Text
+            style={[
+              typography.caption,
+              { color: t.text.muted, padding: spacing.lg },
+            ]}
+          >
+            No blocked users.
+          </Text>
+        ) : (
+          blocked.map((person) => (
+            <View
+              key={person.public_id}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                padding: spacing.lg,
+              }}
+            >
+              <Text
+                style={[typography.body, { color: t.text.primary, flex: 1 }]}
+              >
+                {person.display_name}
+              </Text>
+              <Pressable
+                onPress={async () => {
+                  await api.unblockUser(person.public_id);
+                  await loadBlocked();
+                }}
+              >
+                <Text style={[typography.label, { color: t.accent.default }]}>
+                  Unblock
+                </Text>
+              </Pressable>
+            </View>
+          ))
+        )}
+      </Section>
+
       <View style={{ padding: spacing.xl }}>
         <Button label="Sign out" variant="danger" onPress={signOut} />
         <Text
@@ -113,7 +213,13 @@ export default function Profile() {
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
   const { t } = useTheme();
   return (
     <View style={{ paddingHorizontal: spacing.lg, marginTop: spacing.lg }}>
@@ -166,7 +272,9 @@ function Row({
       }}
     >
       <Icon name={icon} size={20} color={t.accent.default} />
-      <Text style={[typography.body, { color: t.text.primary, flex: 1 }]}>{label}</Text>
+      <Text style={[typography.body, { color: t.text.primary, flex: 1 }]}>
+        {label}
+      </Text>
       <Icon name="chevron-forward" size={18} color={t.text.muted} />
     </Pressable>
   );
